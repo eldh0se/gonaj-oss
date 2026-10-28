@@ -97,7 +97,7 @@
 ### Implementation for User Story 4
 
 - [X] T018 [US4] Create PR check workflow in `.github/workflows/ci.yml` (install → `makemigrations --check` → test suite)
-- [ ] T019 [US4] Open a verification pull request against the feature branch and confirm checks report pass/fail visibly on the PR (needs push + CI run; not done — pushing requires your explicit approval)
+- [X] T019 [US4] Open a verification pull request against the feature branch and confirm checks report pass/fail visibly on the PR (done: PR #1, backend CI job pass in 33s)
 
 **Checkpoint**: All user stories should now be independently functional
 
