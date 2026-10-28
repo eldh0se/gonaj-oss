@@ -1,0 +1,44 @@
+# Backend CI: install, migration check, and test suite on every PR.
+name: backend-ci
+
+on:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: gonaj
+          POSTGRES_USER: gonaj
+          POSTGRES_PASSWORD: gonaj
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U gonaj -d gonaj"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+    env:
+      DJANGO_SECRET_KEY: ci-only-insecure-key
+      POSTGRES_DB: gonaj
+      POSTGRES_USER: gonaj
+      POSTGRES_PASSWORD: gonaj
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install -r backend/requirements-dev.txt
+      - name: Check for missing migrations
+        run: ./manage.py makemigrations --check --dry-run
+        working-directory: backend
+      - name: Run backend test suite
+        run: ./manage.py test
+        working-directory: backend
