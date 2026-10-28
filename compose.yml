@@ -1,0 +1,23 @@
+# Local development database for Gonaj (specs/001-scaffold-admin).
+# PostGIS image is used so the extension is pre-enabled for the later
+# spatial feature; the app itself uses the plain postgresql backend
+# until spatial fields land (see specs/001-scaffold-admin/research.md).
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: gonaj
+      POSTGRES_USER: gonaj
+      POSTGRES_PASSWORD: gonaj
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gonaj -d gonaj"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

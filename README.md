@@ -91,9 +91,11 @@ it before implementation.
 
 Early MVP development. The project has not yet reached end users, and the
 initial dataset (OSM import plus official schedule data) is still being
-assembled. Setup and contribution instructions will be added alongside
-each feature as it is implemented.
+assembled. To run the backend from a fresh clone, follow
+[docs/setup-backend.md](docs/setup-backend.md).
+Further setup and contribution instructions will be added alongside each
+feature as it is implemented.
 
 ## License
 
-See [LICENSE](/Users/eldho/work/meta_hackathon/work/gonaj-oss/LICENSE).
+See [LICENSE](LICENSE).

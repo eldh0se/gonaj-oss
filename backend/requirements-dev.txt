@@ -1,0 +1,3 @@
+# Local development and CI extras. Includes runtime deps for
+# convenience; add lint/type tooling here when a feature needs it.
+-r requirements.txt
