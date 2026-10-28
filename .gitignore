@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local OSM snapshots (Feature 002) — full extracts live here untracked.
+data/osm/
+
+# macOS Finder metadata — never committed.
+.DS_Store

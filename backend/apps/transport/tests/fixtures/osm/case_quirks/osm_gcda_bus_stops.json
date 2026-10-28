@@ -1,0 +1,29 @@
+{
+  "version": 0.6,
+  "generator": "synthetic fixture for anomaly tests",
+  "osm3s": {
+    "timestamp_osm_base": "2026-10-29T00:00:00Z"
+  },
+  "elements": [
+    {
+      "type": "node",
+      "id": 1,
+      "lat": 10.0,
+      "lon": 76.0,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "First"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2,
+      "lat": 10.1,
+      "lon": 76.1,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Second"
+      }
+    }
+  ]
+}

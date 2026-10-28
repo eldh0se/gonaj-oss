@@ -1,0 +1,123 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-09-14T06:27:35Z",
+    "timestamp_areas_base": "2026-09-13T07:08:17Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "way",
+      "id": 544316489,
+      "nodes": [
+        5261851009,
+        7068985539,
+        7068985540,
+        7068985541,
+        7068985542,
+        7068985543,
+        7068985544,
+        7068985545,
+        7068985546,
+        7068985547,
+        7068985548,
+        7068985526,
+        5261851008,
+        7068985528,
+        7068985529,
+        7068985530,
+        5261851007,
+        7068985535,
+        7068985534,
+        5261851006,
+        7068985538,
+        5261851009
+      ],
+      "tags": {
+        "amenity": "bus_station",
+        "building": "yes",
+        "bus": "yes",
+        "mapillary": "1384157088911492",
+        "operator": "Kerala State Road Transport Corporation",
+        "operator:wikidata": "Q679587",
+        "public_transport": "station",
+        "source": "Bing;survey",
+        "wheelchair": "limited"
+      }
+    },
+    {
+      "type": "way",
+      "id": 264434969,
+      "nodes": [
+        3683931766,
+        4677805363,
+        10727851123,
+        3683931751,
+        2302157917,
+        3683931760,
+        7327954465,
+        3683931765,
+        3683931766
+      ],
+      "tags": {
+        "alt_name:en": "Ankamaly",
+        "amenity": "bus_station",
+        "bus": "yes",
+        "name": "Angamaly",
+        "name:ml": "അങ്കമാലി",
+        "operator": "KSRTC",
+        "public_transport": "station",
+        "wikidata": "Q140384330"
+      }
+    },
+    {
+      "type": "node",
+      "id": 5261851009,
+      "lat": 9.9779745,
+      "lon": 76.2885992
+    },
+    {
+      "type": "node",
+      "id": 7068985539,
+      "lat": 9.9780433,
+      "lon": 76.2886269
+    },
+    {
+      "type": "node",
+      "id": 7068985540,
+      "lat": 9.9780217,
+      "lon": 76.2886689
+    },
+    {
+      "type": "node",
+      "id": 7068985541,
+      "lat": 9.9780225,
+      "lon": 76.2887223
+    },
+    {
+      "type": "node",
+      "id": 3683931766,
+      "lat": 10.1960259,
+      "lon": 76.385792
+    },
+    {
+      "type": "node",
+      "id": 4677805363,
+      "lat": 10.1952189,
+      "lon": 76.3861399
+    },
+    {
+      "type": "node",
+      "id": 10727851123,
+      "lat": 10.1952373,
+      "lon": 76.3866308
+    },
+    {
+      "type": "node",
+      "id": 3683931751,
+      "lat": 10.1952469,
+      "lon": 76.3868857
+    }
+  ]
+}

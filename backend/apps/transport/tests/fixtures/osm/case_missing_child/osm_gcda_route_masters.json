@@ -1,0 +1,30 @@
+{
+  "version": 0.6,
+  "generator": "synthetic fixture for anomaly tests",
+  "osm3s": {
+    "timestamp_osm_base": "2026-10-29T00:00:00Z"
+  },
+  "elements": [
+    {
+      "type": "relation",
+      "id": 20,
+      "members": [
+        {
+          "type": "relation",
+          "ref": 999,
+          "role": ""
+        },
+        {
+          "type": "relation",
+          "ref": 10,
+          "role": ""
+        }
+      ],
+      "tags": {
+        "name": "Broken Master",
+        "type": "route_master",
+        "route_master": "bus"
+      }
+    }
+  ]
+}
