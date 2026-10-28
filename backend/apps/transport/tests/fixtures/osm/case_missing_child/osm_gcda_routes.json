@@ -1,0 +1,27 @@
+{
+  "version": 0.6,
+  "generator": "synthetic fixture for anomaly tests",
+  "osm3s": {
+    "timestamp_osm_base": "2026-10-29T00:00:00Z"
+  },
+  "elements": [
+    {
+      "type": "relation",
+      "id": 10,
+      "members": [
+        {
+          "type": "node",
+          "ref": 1,
+          "role": "platform"
+        }
+      ],
+      "tags": {
+        "name": "Solo Loop",
+        "from": "Solo",
+        "to": "Solo",
+        "type": "route",
+        "route": "bus"
+      }
+    }
+  ]
+}

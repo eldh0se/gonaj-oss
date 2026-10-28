@@ -1,0 +1,51 @@
+{
+  "version": 0.6,
+  "generator": "synthetic fixture for anomaly tests",
+  "osm3s": {
+    "timestamp_osm_base": "2026-10-29T00:00:00Z"
+  },
+  "elements": [
+    {
+      "type": "relation",
+      "id": 21,
+      "members": [
+        {
+          "type": "way",
+          "ref": 5,
+          "role": ""
+        },
+        {
+          "type": "relation",
+          "ref": 11,
+          "role": ""
+        },
+        {
+          "type": "relation",
+          "ref": 12,
+          "role": ""
+        }
+      ],
+      "tags": {
+        "name": "Twin",
+        "type": "route_master",
+        "route_master": "bus"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 22,
+      "members": [
+        {
+          "type": "relation",
+          "ref": 11,
+          "role": ""
+        }
+      ],
+      "tags": {
+        "name": "Twin",
+        "type": "route_master",
+        "route_master": "bus"
+      }
+    }
+  ]
+}

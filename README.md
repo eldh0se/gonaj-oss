@@ -58,7 +58,7 @@ deployable application, not microservices.
 | Database | PostgreSQL + PostGIS |
 | Data operations | Django Admin |
 | Transit model | GTFS-inspired |
-| Geographic source | OpenStreetMap (imported, not queried live) |
+| Geographic source | OpenStreetMap snapshot import (offline, provenance-tracked) |
 | Schedule source | Official / RTI-derived / manually curated data |
 | AI assistance | Meta models via backend SDK; read-only tools; output labelled unverified |
 

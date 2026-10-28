@@ -1,0 +1,218 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-09-14T05:45:00Z",
+    "timestamp_areas_base": "2026-09-13T07:08:17Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "relation",
+      "id": 10831516,
+      "members": [
+        {
+          "type": "relation",
+          "ref": 10525436,
+          "role": ""
+        },
+        {
+          "type": "relation",
+          "ref": 10525435,
+          "role": ""
+        }
+      ],
+      "tags": {
+        "name": "High Court ↔ Nedungad (via Vypin)",
+        "network": "Mofussil Kochi bus",
+        "operator": "Private Owners",
+        "route_master": "bus",
+        "type": "route_master",
+        "vehicle:colour": "blue",
+        "via": "Vypin"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 10831517,
+      "members": [
+        {
+          "type": "relation",
+          "ref": 10524079,
+          "role": ""
+        },
+        {
+          "type": "relation",
+          "ref": 10524080,
+          "role": ""
+        }
+      ],
+      "tags": {
+        "name": "Manjanakad ↔ High Court",
+        "network": "Mofussil Kochi bus",
+        "operator": "Private Owners",
+        "route_master": "bus",
+        "type": "route_master",
+        "vehicle:colour": "blue"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 13472198,
+      "members": [
+        {
+          "type": "relation",
+          "ref": 10659777,
+          "role": ""
+        }
+      ],
+      "tags": {
+        "name": "Vytilla Mobility Hub ↔ High Court",
+        "network": "City bus",
+        "operator": "Private Owners",
+        "route_master": "bus",
+        "type": "route_master"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 13953702,
+      "members": [
+        {
+          "type": "way",
+          "ref": 1457971853,
+          "role": ""
+        },
+        {
+          "type": "way",
+          "ref": 1457971851,
+          "role": ""
+        },
+        {
+          "type": "relation",
+          "ref": 13953701,
+          "role": ""
+        },
+        {
+          "type": "relation",
+          "ref": 13953700,
+          "role": ""
+        }
+      ],
+      "tags": {
+        "name": "Chottanikkara ↔ Pukkattupady",
+        "network": "Kochi city bus",
+        "operator": "Private Owners",
+        "route_master": "bus",
+        "type": "route_master",
+        "vehicle:colour": "green",
+        "via": "Menaka"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 13553060,
+      "members": [
+        {
+          "type": "relation",
+          "ref": 13553059,
+          "role": ""
+        },
+        {
+          "type": "relation",
+          "ref": 13553058,
+          "role": ""
+        }
+      ],
+      "tags": {
+        "from": "Aluva",
+        "name": "Aluva ↔ Mattancherry via Padma",
+        "network": "Kochi city bus",
+        "operator": "Private Owners",
+        "route_master": "bus",
+        "to": "Mattancherry",
+        "type": "route_master",
+        "vehicle:colour": "green"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 13750380,
+      "members": [
+        {
+          "type": "relation",
+          "ref": 13750379,
+          "role": ""
+        }
+      ],
+      "tags": {
+        "name": "Vyttila Mobility Hub ↔ Vyttila Mobility Hub (anti-clockwise, via Palarivattom Bypass, Kadavanthara)",
+        "network": "Kochi city bus",
+        "operator": "Private Owners",
+        "roundtrip": "yes",
+        "route_master": "bus",
+        "type": "route_master",
+        "vehicle:colour": "green",
+        "via": "Menaka"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 13531919,
+      "members": [
+        {
+          "type": "relation",
+          "ref": 13531918,
+          "role": ""
+        },
+        {
+          "type": "relation",
+          "ref": 13531917,
+          "role": ""
+        },
+        {
+          "type": "node",
+          "ref": 12358533052,
+          "role": ""
+        }
+      ],
+      "tags": {
+        "name": "Ankamaly ↔ Perumbavoor",
+        "network": "Mofussil Kochi bus",
+        "operator": "Private Owners",
+        "route_master": "bus",
+        "type": "route_master",
+        "vehicle:colour": "blue"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 13951395,
+      "members": [
+        {
+          "type": "way",
+          "ref": 618206399,
+          "role": "route"
+        },
+        {
+          "type": "relation",
+          "ref": 13951394,
+          "role": ""
+        },
+        {
+          "type": "relation",
+          "ref": 13951393,
+          "role": ""
+        }
+      ],
+      "tags": {
+        "name": "Munambam ↔ Vypin",
+        "network": "Mofussil Kochi bus",
+        "operator": "Private Owners",
+        "route_master": "bus",
+        "type": "route_master",
+        "vehicle:colour": "blue"
+      }
+    }
+  ]
+}

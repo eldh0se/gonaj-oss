@@ -1,0 +1,166 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-09-14T06:38:49Z",
+    "timestamp_areas_base": "2026-09-13T07:08:17Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "node",
+      "id": 1049713241,
+      "lat": 10.1445191,
+      "lon": 76.2264466,
+      "tags": {
+        "bus": "yes",
+        "highway": "bus_stop",
+        "name": "KMK Junction",
+        "name:ml": "കെഎംകെ ജംഗ്ഷൻ",
+        "pole": "no",
+        "public_transport": "platform",
+        "shelter": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 6055048486,
+      "lat": 10.1535039,
+      "lon": 76.3735,
+      "tags": {
+        "highway": "bus_stop"
+      }
+    },
+    {
+      "type": "node",
+      "id": 7090079390,
+      "lat": 10.1062524,
+      "lon": 76.3562001,
+      "tags": {
+        "bench": "no",
+        "bin": "yes",
+        "bus": "yes",
+        "highway": "bus_stop",
+        "lit": "yes",
+        "name": "Aluva KSRTC Stand",
+        "name:en": "Aluva",
+        "name:ml": "ആലുവ കെ.എസ്.ആർ.ടി.സി",
+        "operator": "KSRTC",
+        "pole": "no",
+        "public_transport": "platform",
+        "shelter": "yes",
+        "short_name": "ALY"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2391343018,
+      "lat": 9.9520508,
+      "lon": 76.2557319,
+      "tags": {
+        "bus": "yes",
+        "highway": "bus_stop",
+        "name": "Paravana Mukk",
+        "name:ml": "പറവന മുക്ക്",
+        "operator": "govt",
+        "pole": "no",
+        "public_transport": "platform",
+        "shelter": "no"
+      }
+    },
+    {
+      "type": "node",
+      "id": 1049713235,
+      "lat": 10.1395161,
+      "lon": 76.1990351,
+      "tags": {
+        "alt_name": "Cherai",
+        "bus": "yes",
+        "highway": "bus_stop",
+        "name": "Palli",
+        "name:ml": "പള്ളി",
+        "pole": "no",
+        "public_transport": "platform",
+        "shelter": "no"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2376866788,
+      "lat": 9.9468775,
+      "lon": 76.3532115,
+      "tags": {
+        "bench": "no",
+        "bus": "yes",
+        "check_date:shelter": "2026-06-06",
+        "highway": "bus_stop",
+        "name": "Railway Station",
+        "name:ml": "റെയിൽവേ സ്റ്റേഷൻ",
+        "public_transport": "platform",
+        "shelter": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 7464400088,
+      "lat": 9.9200586,
+      "lon": 76.2741794,
+      "tags": {
+        "bus": "yes",
+        "highway": "bus_stop",
+        "name": "Palluruthy Veli",
+        "name:ml": "പള്ളുരുത്തി വെളി",
+        "public_transport": "platform",
+        "shelter": "yes",
+        "via": "Menaka"
+      }
+    },
+    {
+      "type": "node",
+      "id": 982135818,
+      "lat": 9.973546,
+      "lon": 76.244141,
+      "tags": {
+        "bus": "yes",
+        "highway": "bus_stop",
+        "internet_access": "no",
+        "name": "Vypin",
+        "name:en": "Vypin",
+        "name:ml": "വൈപ്പിൻ",
+        "public_transport": "platform",
+        "shelter": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 944902406,
+      "lat": 9.9778726,
+      "lon": 76.3342102,
+      "tags": {
+        "bus": "yes",
+        "highway": "bus_stop",
+        "name": "Labour Corner",
+        "name:ml": "ലേബർ കോർണർ",
+        "pole": "no",
+        "public_transport": "platform",
+        "shelter": "no"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2712147178,
+      "lat": 9.9680734,
+      "lon": 76.2880821,
+      "tags": {
+        "bench": "yes",
+        "bus": "yes",
+        "covered": "yes",
+        "highway": "bus_stop",
+        "name": "Ernakulam South",
+        "name:ml": "എറണാകുളം സൗത്ത്",
+        "public_transport": "platform",
+        "shelter": "yes"
+      }
+    }
+  ]
+}
