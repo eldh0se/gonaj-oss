@@ -123,9 +123,11 @@ MUST follow data minimisation: no tracking and no PII.
 ## Technology Stack & Architecture Constraints
 
 The MVP stack is fixed: `backend/` is Django + Django REST Framework on
-PostgreSQL + PostGIS; `frontend/` is React + TypeScript with Leaflet for
+PostgreSQL + PostGIS; `frontend/` is React with Leaflet for
 the interactive map (map-provider integration MUST stay isolated so the
-implementation can change; MapLibre is the recorded alternative). The
+implementation can change; MapLibre GL JS is the recorded alternative). TypeScript
+is the preferred frontend language; JSX is permitted where the existing scaffold
+sets the precedent, with conversion tracked as follow-up work. The
 public tile service MUST be OSM public tiles only for the small MVP, with
 required attribution, appropriate self-identification, no bulk/prefetch
 downloading, and a configurable tile-provider setting. The product MUST
@@ -164,4 +166,6 @@ backward-incompatible governance or principle removals/redefinitions,
 MINOR for new principles or materially expanded guidance, PATCH for
 clarifications and wording fixes.
 
-**Version**: 1.3.0 | **Ratified**: 2026-10-28 | **Last Amended**: 2026-10-28
+**Version**: 1.4.0 | **Ratified**: 2026-10-28 | **Last Amended**: 2026-10-29
+
+**Amendment history**: v1.4.0 (2026-10-29) — JSX permitted where the existing scaffold sets the precedent (TypeScript remains preferred; conversion tracked as follow-up); 'MapLibre' clarified as MapLibre GL JS. Supersedes the React+TypeScript stack MUST for scaffold extensions; recorded as remediation of 005-route-map analysis findings C1/L2.

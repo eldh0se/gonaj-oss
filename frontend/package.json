@@ -6,14 +6,20 @@
   "description": "Gonaj public web UI placeholder (specs/001-scaffold-admin). Real map UI lands with the first transport feature.",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "test": "vitest run"
   },
   "dependencies": {
+    "leaflet": "1.9.4",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "react-router-dom": "6.28.0"
   },
   "devDependencies": {
+    "@testing-library/react": "16.1.0",
     "@vitejs/plugin-react": "4.7.0",
-    "vite": "6.4.5"
+    "jsdom": "25.0.1",
+    "vite": "6.4.5",
+    "vitest": "2.1.8"
   }
 }
