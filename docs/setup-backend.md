@@ -68,6 +68,23 @@ cd backend
 
 Expected: all migrations apply cleanly. Re-running is a safe no-op.
 
+## 5b. Create the throttle-counter table
+
+The read API keeps per-IP rate-limit counters in the database
+itself (no extra service). Create its table once per database —
+without it every `/api/v1/routes/`, `/api/v1/stops/`, and
+`/api/v1/connectivity/` request fails with
+`relation "transport_throttle_cache" does not exist`:
+
+```sh
+./manage.py createcachetable
+```
+
+Expected: the command succeeds silently (re-running is a safe
+no-op). Run it again for every fresh database, including the test
+setup on a new machine. It stores only hashed, expiring counters —
+no personal data.
+
 ## 6. Create the admin account
 
 ```sh

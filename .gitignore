@@ -222,5 +222,10 @@ __marimo__/
 # Local OSM snapshots (Feature 002) — full extracts live here untracked.
 data/osm/
 
+# Machine-readable import reports default to the working directory
+# (see `--report-path` in specs/002-osm-snapshot-import/contracts/cli-import.md).
+# Prefer /tmp for throwaway runs; never commit real reports.
+osm-import-report.json
+
 # macOS Finder metadata — never committed.
 .DS_Store

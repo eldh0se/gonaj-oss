@@ -107,4 +107,22 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-REST_FRAMEWORK = {}
+REST_FRAMEWORK = {
+    "EXCEPTION_HANDLER": "apps.transport.api.errors.plain_exception_handler",
+    "DEFAULT_THROTTLE_RATES": {
+        "transport_minute": "180/min",
+        "transport_day": "5000/day",
+    },
+}
+
+# Throttle counters live in the project's own database (created with
+# `manage.py createcachetable`). Set to the address of a trusted
+# reverse proxy to honour forwarded-for headers; left empty, only
+# the direct connection address identifies a client (FR-024).
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "transport_throttle_cache",
+    }
+}
+TRANSPORT_TRUSTED_PROXY = env("TRANSPORT_TRUSTED_PROXY", "")

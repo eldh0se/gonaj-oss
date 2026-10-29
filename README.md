@@ -93,6 +93,9 @@ Early MVP development. The project has not yet reached end users, and the
 initial dataset (OSM import plus official schedule data) is still being
 assembled. To run the backend from a fresh clone, follow
 [docs/setup-backend.md](docs/setup-backend.md).
+The public read-only transport API (routes, stops, direct
+connectivity) is documented in
+[docs/read-map-api.md](docs/read-map-api.md).
 Further setup and contribution instructions will be added alongside each
 feature as it is implemented.
 
