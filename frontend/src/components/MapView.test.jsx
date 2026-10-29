@@ -52,6 +52,10 @@ describe("MapView", () => {
     const mock = leafletMock();
     expect(mock.L.circleMarker).toHaveBeenCalledTimes(2);
     expect(mock.L.circleMarker.mock.calls[0][0]).toEqual([9.97, 76.28]);
+    expect(mock.L.circleMarker.mock.calls[0][1]).toMatchObject({
+      fillColor: "#0b6e4f",
+      color: "#ffffff",
+    });
     const firstMarker = mock.L.circleMarker.mock.results[0].value;
     const click = firstMarker.on.mock.calls.find(([event]) => event === "click")[1];
     click();
@@ -92,6 +96,17 @@ describe("MapView", () => {
     });
   });
 
+  it("rings the selected stop distinctly", () => {
+    const noop = () => {};
+    render(<MapView markers={MARKERS} onAreaChange={noop} selectedId={2} />);
+    const mock = leafletMock();
+    expect(mock.L.circleMarker.mock.calls[0][1]).toMatchObject({ radius: 7 });
+    expect(mock.L.circleMarker.mock.calls[1][1]).toMatchObject({
+      radius: 10,
+      fillColor: "#084d38",
+    });
+  });
+
   it("centres the map when a stop is picked", () => {
     const noop = () => {};
     const { rerender } = render(<MapView markers={[]} onAreaChange={noop} />);
@@ -111,7 +126,11 @@ describe("MapView", () => {
       <MapView markers={[]} onAreaChange={noop} highlight={line} />
     );
     const mock = leafletMock();
-    expect(mock.L.polyline).toHaveBeenCalledWith(line);
+    expect(mock.L.polyline.mock.calls[0][0]).toEqual(line);
+    expect(mock.L.polyline.mock.calls[0][1]).toMatchObject({
+      color: "#0b6e4f",
+      weight: 4,
+    });
     const highlightLayer = mock.L.layerGroup.mock.results.map((r) => r.value)[1];
     rerender(<MapView markers={[]} onAreaChange={noop} highlight={null} />);
     expect(highlightLayer.clearLayers).toHaveBeenCalledTimes(2);
@@ -130,6 +149,13 @@ describe("MapView", () => {
     });
     expect(screen.getByRole("status").textContent).toMatch(/imagery is unavailable/);
     expect(screen.getByTestId("map-container")).toBeTruthy();
+  });
+
+  it("refreshes the map size on window resize", () => {
+    const noop = () => {};
+    render(<MapView markers={[]} onAreaChange={noop} />);
+    window.dispatchEvent(new Event("resize"));
+    expect(lastMap().invalidateSize).toHaveBeenCalled();
   });
 
   it("removes the map on unmount", () => {

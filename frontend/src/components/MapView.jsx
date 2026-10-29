@@ -24,6 +24,7 @@ export default function MapView({
   markers = [],
   highlight = null,
   center = null,
+  selectedId = null,
   onAreaChange,
   onSelectStop,
 }) {
@@ -36,6 +37,12 @@ export default function MapView({
   const onSelectStopRef = useRef(onSelectStop);
   onSelectStopRef.current = onSelectStop;
   const [tilesFailed, setTilesFailed] = useState(false);
+
+  useEffect(() => {
+    const onResize = () => mapRef.current?.invalidateSize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     const map = L.map(containerRef.current).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
@@ -69,18 +76,24 @@ export default function MapView({
     if (!layer) return;
     layer.clearLayers();
     for (const marker of markers) {
-      L.circleMarker([marker.lat, marker.lon], { radius: 7 })
+      const selected = marker.id === selectedId;
+      L.circleMarker(
+        [marker.lat, marker.lon],
+        selected
+          ? { radius: 10, color: "#ffffff", weight: 3, fillColor: "#084d38", fillOpacity: 1 }
+          : { radius: 7, color: "#ffffff", weight: 2, fillColor: "#0b6e4f", fillOpacity: 0.95 }
+      )
         .on("click", () => onSelectStopRef.current?.(marker))
         .addTo(layer);
     }
-  }, [markers]);
+  }, [markers, selectedId]);
 
   useEffect(() => {
     const layer = highlightLayerRef.current;
     if (!layer) return;
     layer.clearLayers();
     if (highlight && highlight.length > 0) {
-      L.polyline(highlight).addTo(layer);
+      L.polyline(highlight, { color: "#0b6e4f", weight: 4, opacity: 0.9 }).addTo(layer);
     }
   }, [highlight]);
 

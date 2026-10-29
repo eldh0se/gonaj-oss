@@ -18,6 +18,17 @@ function toBbox(bounds) {
   return `${bounds.west},${bounds.south},${bounds.east},${bounds.north}`;
 }
 
+const emptyListResult = () => ({ items: [], page: 1, totalPages: 1, count: 0 });
+
+function toListResult(body) {
+  return {
+    items: body.results ?? [],
+    page: body.current_page ?? 1,
+    totalPages: body.total_pages ?? 1,
+    count: body.count ?? 0,
+  };
+}
+
 export default function App() {
   return (
     <Routes>
@@ -33,10 +44,12 @@ export function MapPage() {
 
   const [area, setArea] = useState({ status: "loading", markers: [], detail: "" });
   const [query, setQuery] = useState("");
+  const [routePage, setRoutePage] = useState(1);
+  const [stopPage, setStopPage] = useState(1);
   const [search, setSearch] = useState({
     state: "loading",
-    routes: [],
-    stops: [],
+    routes: emptyListResult(),
+    stops: emptyListResult(),
     errorDetail: "",
   });
   const [stopCard, setStopCard] = useState(null);
@@ -83,28 +96,30 @@ export function MapPage() {
 
   const handleQuery = useCallback((next) => {
     setQuery(next);
+    setRoutePage(1);
+    setStopPage(1);
   }, []);
 
   useEffect(() => {
     searchAbort.current?.abort();
     const controller = new AbortController();
     searchAbort.current = controller;
-    setSearch({ state: "loading", routes: [], stops: [], errorDetail: "" });
+    setSearch((s) => ({ ...s, state: "loading", errorDetail: "" }));
     const text = query.trim();
     Promise.all([
       listRoutes(
-        text ? { search: text, pageSize: 20 } : { pageSize: 20 },
+        { ...(text ? { search: text } : {}), pageSize: 20, page: routePage },
         { signal: controller.signal }
       ),
       listStops(
-        text ? { search: text, pageSize: 20 } : { pageSize: 20 },
+        { ...(text ? { search: text } : {}), pageSize: 20, page: stopPage },
         { signal: controller.signal }
       ),
     ]).then(
       ([routesBody, stopsBody]) => {
-        const routes = routesBody.results ?? [];
-        const stops = stopsBody.results ?? [];
-        if (routes.length === 0 && stops.length === 0) {
+        const routes = toListResult(routesBody);
+        const stops = toListResult(stopsBody);
+        if (routes.count === 0 && stops.count === 0) {
           setSearch({
             state: text ? "no-match" : "empty",
             routes,
@@ -119,15 +134,15 @@ export function MapPage() {
         if (err?.name === "AbortError") return;
         setSearch({
           state: "error",
-          routes: [],
-          stops: [],
+          routes: emptyListResult(),
+          stops: emptyListResult(),
           errorDetail:
             err?.detail ?? "Search cannot load right now. Please try again later.",
         });
       }
     );
     return () => controller.abort();
-  }, [query]);
+  }, [query, routePage, stopPage]);
 
   useEffect(() => {
     overlayAbort.current?.abort();
@@ -204,7 +219,6 @@ export function MapPage() {
         <h1 className="gonaj-title">
           <Link to="/">Gonaj</Link>
         </h1>
-        <SearchBox onQuery={handleQuery} />
       </header>
 
       <div className="gonaj-body">
@@ -213,6 +227,9 @@ export function MapPage() {
             markers={area.markers}
             highlight={highlight}
             center={center}
+            selectedId={
+              stopCard?.state === "ok" && stopCard.detail ? stopCard.detail.id : null
+            }
             onAreaChange={handleAreaChange}
             onSelectStop={handleSelectStop}
           />
@@ -220,7 +237,7 @@ export function MapPage() {
             <p role="status" className="gonaj-area-note">Loading stops…</p>
           )}
           {area.status === "zoom_in" && (
-            <p role="status" className="gonaj-area-note">{area.detail}</p>
+            <p role="status" className="gonaj-area-note gonaj-area-note--warn">{area.detail}</p>
           )}
           {area.status === "empty" && (
             <p role="status" className="gonaj-area-note">
@@ -230,57 +247,62 @@ export function MapPage() {
           {area.status === "error" && (
             <p role="alert" className="gonaj-area-note">{area.detail}</p>
           )}
-          {stopCard && (
-            <aside className="gonaj-stop-card" aria-label="Selected stop">
-              <button type="button" onClick={() => setStopCard(null)}>
-                Close
-              </button>
-              {stopCard.state === "loading" && <p role="status">Loading stop…</p>}
-              {stopCard.state === "error" && (
-                <p role="alert">{stopCard.errorDetail}</p>
-              )}
-              {stopCard.state === "ok" && stopCard.detail && (
-                <>
-                  <h2>{stopCard.detail.name}</h2>
-                  <h3>Serving routes</h3>
-                  {(stopCard.detail.serving_routes ?? []).length === 0 ? (
-                    <p>No routes serve this stop.</p>
-                  ) : (
-                    <ul>
-                      {(stopCard.detail.serving_routes ?? []).map((r) => (
-                        <li key={r.id}>
-                          <button type="button" onClick={() => handleSelectRoute(r.id)}>
-                            {r.name ?? `Route ${r.id}`}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              )}
-            </aside>
-          )}
         </section>
 
         <aside className="gonaj-results" aria-label="Search results">
+          <SearchBox onQuery={handleQuery} />
           <ResultsList
-            routes={search.routes}
-            stops={search.stops}
+            routeList={search.routes}
+            stopList={search.stops}
             state={search.state}
             errorDetail={search.errorDetail}
             onSelectRoute={handleSelectRoute}
             onSelectStop={handleSelectStop}
+            onRoutePage={setRoutePage}
+            onStopPage={setStopPage}
           />
         </aside>
       </div>
 
-      {routeId && overlay.state !== "idle" && (
+      {routeId && overlay.state !== "idle" ? (
         <RouteOverlay
           detail={overlay.detail}
           state={overlay.state}
           errorDetail={overlay.errorDetail}
           onDismiss={handleDismissOverlay}
         />
+      ) : (
+        !routeId &&
+        stopCard && (
+          <section aria-label="Selected stop" className="gonaj-overlay">
+            <button type="button" onClick={() => setStopCard(null)}>
+              Close
+            </button>
+            {stopCard.state === "loading" && <p role="status">Loading stop…</p>}
+            {stopCard.state === "error" && (
+              <p role="alert">{stopCard.errorDetail}</p>
+            )}
+            {stopCard.state === "ok" && stopCard.detail && (
+              <>
+                <h2>{stopCard.detail.name}</h2>
+                <h3>Serving routes</h3>
+                {(stopCard.detail.serving_routes ?? []).length === 0 ? (
+                  <p>No routes serve this stop.</p>
+                ) : (
+                  <ul>
+                    {(stopCard.detail.serving_routes ?? []).map((r) => (
+                      <li key={r.id}>
+                        <button type="button" onClick={() => handleSelectRoute(r.id)}>
+                          {r.name ?? `Route ${r.id}`}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </section>
+        )
       )}
 
       <ChatDock />

@@ -36,12 +36,23 @@ export default function RouteOverlay({ detail, state, errorDetail, onDismiss }) 
               No stops are recorded for this route yet.
             </p>
           ) : (
-            <ol>
+            <ol className="gonaj-timeline">
               {(detail.stops ?? []).map((step) => (
-                <li key={`${step.position}-${step.stop.id}`}>
-                  {step.stop.name}
-                  {step.is_origin && " (origin)"}
-                  {step.is_terminus && " (terminus)"}
+                <li
+                  key={`${step.position}-${step.stop.id}`}
+                  className={[
+                    step.is_origin && "is-origin",
+                    step.is_terminus && "is-terminus",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
+                  <span aria-hidden="true" className="gonaj-tl-gutter" />
+                  <span>
+                    {step.stop.name}
+                    {step.is_origin && " (origin)"}
+                    {step.is_terminus && " (terminus)"}
+                  </span>
                 </li>
               ))}
             </ol>

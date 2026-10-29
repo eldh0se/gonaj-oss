@@ -139,6 +139,25 @@
 
 ---
 
+## Phase 8: Visual Design (FR-013–FR-015, SC-007)
+
+**Purpose**: Apply the restrained transit-counter identity over the built views
+
+**Independent Test**: Review confirms palette-only colors, 10px radius, and the type scale across all views; overlay is a side panel on wide screens and a full-width card on small screens; the open route renders as a 4px green polyline with ringed stops (quickstart §1–§5 re-checked visually).
+
+- [X] T022 Create design tokens (FR-013 palette, 10px radius, 13px/17px type scale) and restyle header, search, rail, cards, dock, and overlay panel with sticky search in `frontend/src/App.css`
+- [X] T023 [P] Apply green-dot/white-ring markers, selected-stop ring, and 4px green route polyline in `frontend/src/components/MapView.jsx` and update symbology assertions in `frontend/src/components/MapView.test.jsx`
+- [X] T024 Position the overlay as a fixed right-side panel on wide screens and a full-width card on small screens plus stop-card polish in `frontend/src/App.css` and `frontend/src/App.jsx`
+- [X] T025 Run the full frontend suite green with `npm test`, `npm run build`, and the SC-007 review in `frontend/`
+- [X] T026 Fix map vertical fill (`.gonaj-map` flex chain) and convert the rail to user-selectable Routes/Stops tabs with single-sided auto-open in `frontend/src/App.css`, `frontend/src/components/ResultsList.jsx`, and `frontend/src/components/SearchBox.test.jsx`
+- [X] T027 Scale the header proportionally with `clamp()`, theme the overlay chrome (close button, definition list), and render route stops as a dot-and-line timeline in `frontend/src/App.css`, `frontend/src/components/RouteOverlay.jsx`, and `frontend/src/components/RouteOverlay.test.jsx`
+- [X] T028 Widen the timeline gutter, group route details inside their cards, bump item type to 14px, and proportionally scale plus restack the footer in `frontend/src/App.css`, `frontend/src/components/ResultsList.jsx`, and `frontend/src/components/SearchBox.test.jsx`
+- [X] T029 Rebuild the timeline with a dedicated gutter column, remove the dead overlay-list rule, and add mobile header top padding with safe-area support in `frontend/src/App.css`, `frontend/src/components/RouteOverlay.jsx`, and `frontend/src/components/RouteOverlay.test.jsx`
+- [X] T030 Show result counts with independent prev/next paging per rail tab, refetching the 003 page on navigation, in `frontend/src/App.jsx`, `frontend/src/components/ResultsList.jsx`, `frontend/src/App.css`, and `frontend/src/components/SearchBox.test.jsx`
+- [X] T031 Move the search box from the header to a sticky position atop the rail tabs in `frontend/src/App.jsx`, `frontend/src/App.css`, and `specs/005-route-map/spec.md`
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

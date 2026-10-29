@@ -40,6 +40,23 @@ describe("RouteOverlay", () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
+  it("renders stops as a timeline with pinned endpoints", () => {
+    const noop = () => {};
+    const { container } = render(
+      <RouteOverlay detail={DETAIL} state="ok" errorDetail="" onDismiss={noop} />
+    );
+    expect(screen.getByRole("list").className).toMatch(/gonaj-timeline/);
+    const items = screen.getAllByRole("listitem");
+    expect(items).toHaveLength(3);
+    expect(items[0].className).toMatch(/is-origin/);
+    expect(items[0].className).not.toMatch(/is-terminus/);
+    expect(items[2].className).toMatch(/is-terminus/);
+    // Symbols live in their own gutter column, separate from the names.
+    const gutters = container.querySelectorAll(".gonaj-tl-gutter");
+    expect(gutters).toHaveLength(3);
+    expect(items[0].querySelector(".gonaj-tl-gutter")).toBeTruthy();
+  });
+
   it("reports unknown routes and failures in plain language", () => {
     const noop = () => {};
     const { rerender } = render(

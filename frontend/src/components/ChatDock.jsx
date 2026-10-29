@@ -8,7 +8,8 @@ export default function ChatDock() {
   return (
     <section aria-label="Journey helper" className="gonaj-dock">
       <h2>Journey helper</h2>
-      <p>Coming soon — plain-language direct-route answers will live here.</p>
+      <span className="gonaj-tag">Coming soon</span>
+      <p>Plain-language direct-route answers will live here.</p>
       <button type="button" onClick={() => setMessage("The journey helper is not available yet.")}>
         Ask the journey helper
       </button>

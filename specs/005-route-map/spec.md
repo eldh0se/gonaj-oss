@@ -216,7 +216,9 @@ activating it sends no request and stores nothing.
   origin, destination, or served stop name) and matching
   stops (by name), served from the application's own data
   only. Blank search MUST browse all; matching nothing MUST
-  say so plainly with a spelling-or-browse hint.
+  say so plainly with a spelling-or-browse hint. The rail
+  MUST show result counts with page navigation for routes
+  and stops independently.
 - **FR-006**: The route detail overlay MUST show the route's
   name, origin, destination, operator, and network; its stops
   in travelling order with origin and terminus marked; and
@@ -247,6 +249,36 @@ activating it sends no request and stores nothing.
 - **FR-012**: Read API or tile failures MUST surface as
   plain-language, non-technical messages in place (map, list,
   or overlay), never as broken chrome or technical dumps.
+- **FR-013**: The UI MUST use one restrained visual identity:
+  white `#ffffff` surfaces, ink `#17201c` text, deep transit
+  green `#0b6e4f` as the single signal color (active route,
+  selected marker, primary actions), sage `#e7efe9` fills,
+  amber `#b45309` reserved for warnings (amber wash `#fdf3e7`
+  for warning fills), page backdrop `#f2f5f3`, 1px `#d8dee0`
+  borders, 10px radius, and the system font stack with 13px
+  list text, 14px route/stop item text for daylight
+  readability, and 17px semibold headings. No other hues,
+  webfonts, gradients, or shadows beyond a panel shadow.
+- **FR-014**: The layout MUST be an app shell that fits
+  the viewport with no page scroll: brand header on top,
+  map plus results rail in the middle (the rail scrolls
+  internally with a sticky search box pinned above its
+  tabs, the map fills its area), and the chat dock as
+  a slim always-visible footer bar marked with a "Coming
+  soon" tag, with the title and padding scaling
+  proportionally within fixed bounds. The rail MUST present
+  routes and stops as user-selectable tabs, opening directly
+  on whichever side holds results. Route and stop details MUST share one right-side
+  detail panel over the rail on wide screens and one bottom
+  sheet on small screens, with route detail taking
+  precedence when both apply.
+- **FR-015**: Map symbology MUST mark in-area stops as green
+  `#0b6e4f` dots with a white ring, the selected stop with a
+  distinct ring, and the open route as a 4px green polyline.
+  The overlay MUST show stops as a timeline (dots joined by a
+  connecting line confined to their own gutter column that
+  never overlaps the stop names, origin and terminus as
+  filled dots with pinned labels), not as a numbered list.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -293,6 +325,11 @@ activating it sends no request and stores nothing.
   accounts and no tracking, all map imagery is the public
   tile service with attribution, and the single-column small
   screen layout has 0 unreachable controls.
+- **SC-007**: Review confirms 100% of views use only the
+  FR-013 palette, radius, and type scale; the overlay opens
+  as a side panel on wide screens and a full-width card on
+  small screens; and the open route is visibly distinct on
+  the map in 100% of checks.
 
 ## Assumptions
 
