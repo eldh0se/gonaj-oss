@@ -107,6 +107,10 @@ facts) without the master they came from.
 - `origin` is the stored origin text, `destination` the stored
   destination text; `name`, `operator`, `network` are `null` when
   not held — never invented.
+- Value-rule delta (006): blank stored `origin`/`destination`
+  now fall back to endpoint stop names identically in list,
+  detail, and connectivity — see
+  `specs/006-route-endpoint-fallback/contracts/endpoint-fallback.md`.
 - Order: master-membership position, then `id`. Stored duplicates
   are preserved; a route matching the search through several stops
   still appears once per stored route row.

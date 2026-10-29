@@ -297,3 +297,113 @@ class RouteDetailTests(ApiTestCase):
             self.assertEqual(response.status_code, 404, pk)
             self.assertEqual(set(response.json()), {"detail"})
             self.assertIn("route", response.json()["detail"].lower())
+
+
+class EndpointFallbackDetailTests(ApiTestCase):
+    """006 US1: tag-less detail falls back to endpoint stop names."""
+
+    @classmethod
+    def setUpTestData(cls):
+        _, cls.import_run = f.make_snapshot(label="factory-endpoint-detail")
+        cls.master = f.make_master(
+            cls.import_run, 91, "M", operator="KSRTC")
+        cls.first = f.make_stop(
+            cls.import_run, 901, "First Halt", 10.0, 76.3)
+        cls.last = f.make_stop(
+            cls.import_run, 902, "Last Halt", 10.01, 76.31)
+        cls.tagless = f.make_route(cls.import_run, 901, "Untagged Run")
+        f.link_master(cls.import_run, cls.master, cls.tagless, 1)
+        f.link_stop(cls.import_run, cls.tagless, cls.first, 1)
+        f.link_stop(cls.import_run, cls.tagless, cls.last, 2)
+        cls.blank = f.make_route(
+            cls.import_run, 902, "Blank Run",
+            from_text="   ", to_text="")
+        f.link_master(cls.import_run, cls.master, cls.blank, 2)
+        f.link_stop(cls.import_run, cls.blank, cls.first, 1)
+        f.link_stop(cls.import_run, cls.blank, cls.last, 2)
+        cls.stored = f.make_route(
+            cls.import_run, 903, "Stored Run",
+            from_text="Kept Origin", to_text="Kept Destination")
+        f.link_master(cls.import_run, cls.master, cls.stored, 3)
+        f.link_stop(cls.import_run, cls.stored, cls.first, 1)
+        f.link_stop(cls.import_run, cls.stored, cls.last, 2)
+        cls.empty = f.make_route(cls.import_run, 904, "Empty Run")
+        f.link_master(cls.import_run, cls.master, cls.empty, 4)
+        cls.solo = f.make_route(cls.import_run, 905, "Solo Run")
+        f.link_master(cls.import_run, cls.master, cls.solo, 5)
+        f.link_stop(cls.import_run, cls.solo, cls.first, 1)
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_tagless_detail_falls_back_to_endpoint_names(self):
+        body = self.client.get(
+            f"/api/v1/routes/{self.tagless.id}/").json()
+        self.assertEqual(
+            (body["origin"], body["destination"]),
+            ("First Halt", "Last Halt"))
+
+    def test_blank_and_whitespace_stored_text_counts_as_absent(self):
+        body = self.client.get(
+            f"/api/v1/routes/{self.blank.id}/").json()
+        self.assertEqual(
+            (body["origin"], body["destination"]),
+            ("First Halt", "Last Halt"))
+
+    def test_stored_text_wins_byte_identically(self):
+        body = self.client.get(
+            f"/api/v1/routes/{self.stored.id}/").json()
+        self.assertEqual(
+            (body["origin"], body["destination"]),
+            ("Kept Origin", "Kept Destination"))
+
+    def test_stopless_tagless_route_stays_null(self):
+        body = self.client.get(
+            f"/api/v1/routes/{self.empty.id}/").json()
+        self.assertEqual((body["origin"], body["destination"]), (None, None))
+        self.assertEqual(body["stops"], [])
+
+    def test_single_stop_route_names_it_twice(self):
+        body = self.client.get(
+            f"/api/v1/routes/{self.solo.id}/").json()
+        self.assertEqual(
+            (body["origin"], body["destination"]),
+            ("First Halt", "First Halt"))
+
+
+class EndpointFallbackListTests(ApiTestCase):
+    """006 US2: list serves the identical fallback; shapes agree."""
+
+    @classmethod
+    def setUpTestData(cls):
+        _, cls.import_run = f.make_snapshot(label="factory-endpoint-list")
+        cls.master = f.make_master(cls.import_run, 95, "M")
+        cls.first = f.make_stop(
+            cls.import_run, 951, "North Gate", 10.0, 76.3)
+        cls.last = f.make_stop(
+            cls.import_run, 952, "South Gate", 10.01, 76.31)
+        cls.tagless = f.make_route(cls.import_run, 951, "Untagged Loop")
+        f.link_master(cls.import_run, cls.master, cls.tagless, 1)
+        f.link_stop(cls.import_run, cls.tagless, cls.first, 1)
+        f.link_stop(cls.import_run, cls.tagless, cls.last, 2)
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_list_serves_endpoint_names_for_tagless_routes(self):
+        body = self.client.get(
+            "/api/v1/routes/", {"search": "Untagged"}).json()
+        self.assertEqual(body["count"], 1)
+        row = body["results"][0]
+        self.assertEqual(
+            (row["origin"], row["destination"]),
+            ("North Gate", "South Gate"))
+
+    def test_list_and_detail_carry_identical_values(self):
+        row = self.client.get(
+            "/api/v1/routes/", {"search": "Untagged"}).json()["results"][0]
+        detail = self.client.get(
+            f"/api/v1/routes/{self.tagless.id}/").json()
+        self.assertEqual(
+            (row["origin"], row["destination"]),
+            (detail["origin"], detail["destination"]))
