@@ -40,7 +40,10 @@ class ThrottleTests(ApiTestCase):
         cls.paths = [
             ("/api/v1/routes/", {}),
             ("/api/v1/stops/", {"search": "A"}),
-            (f"/api/v1/routes/{1}/", {}),
+            # Real id, not a literal: Postgres sequences are not
+            # reset by rolled-back tests, so pk 1 is not guaranteed
+            # (SQLite reuses it, which is why this only failed in CI).
+            (f"/api/v1/routes/{cls.route.id}/", {}),
         ]
 
     def setUp(self):
