@@ -1,0 +1,512 @@
+/* Transit-counter identity (005-route-map FR-013–FR-015).
+   Palette: white surfaces, ink text, one signal green, sage fills,
+   amber for warnings. System type, 10px radius, no webfonts. */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+:root {
+  --gonaj-ink: #17201c;
+  --gonaj-muted: rgba(23, 32, 28, 0.68);
+  --gonaj-green: #0b6e4f;
+  --gonaj-green-dark: #084d38;
+  --gonaj-sage: #e7efe9;
+  --gonaj-amber: #b45309;
+  --gonaj-amber-wash: #fdf3e7;
+  --gonaj-line: #d8dee0;
+  --gonaj-backdrop: #f2f5f3;
+  --gonaj-surface: #ffffff;
+  --gonaj-radius: 10px;
+}
+
+.gonaj-page {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--gonaj-ink);
+  background: var(--gonaj-backdrop);
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.gonaj-header {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  padding: clamp(0.6rem, 1vw, 1rem) clamp(0.75rem, 2vw, 1.5rem);
+  background: var(--gonaj-surface);
+  border-bottom: 1px solid var(--gonaj-line);
+}
+
+.gonaj-title {
+  font-size: clamp(17px, 1vw + 13px, 24px);
+  font-weight: 600;
+  margin: 0;
+}
+
+.gonaj-title a {
+  color: inherit;
+  text-decoration: none;
+  border-left: 4px solid var(--gonaj-green);
+  padding-left: 0.5rem;
+}
+
+.gonaj-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 16rem;
+  max-width: 28rem;
+}
+
+.gonaj-search label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.gonaj-search input {
+  width: 100%;
+  max-width: 100%;
+  font: inherit;
+  font-size: 14px;
+  color: var(--gonaj-ink);
+  background: var(--gonaj-surface);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  padding: 0.45rem 0.7rem;
+}
+
+.gonaj-search input:focus-visible {
+  outline: 2px solid var(--gonaj-green);
+  outline-offset: -2px;
+}
+
+.gonaj-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.gonaj-map-wrap {
+  flex: 3 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.gonaj-map {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.gonaj-map-container {
+  flex: 1 1 auto;
+  min-height: 12rem;
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  background: var(--gonaj-sage);
+}
+
+.gonaj-results {
+  flex: 2 1 0;
+  min-width: 0;
+  min-height: 0;
+  max-width: 360px;
+  overflow-y: auto;
+}
+
+.gonaj-results .gonaj-search {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  max-width: none;
+  margin-bottom: 0.75rem;
+  padding: 0.25rem 0 0.5rem;
+  background: var(--gonaj-backdrop);
+}
+
+.gonaj-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--gonaj-sage);
+  border-radius: var(--gonaj-radius);
+  padding: 2px;
+  margin: 0 0 0.75rem;
+}
+
+.gonaj-tabs [role="tab"] {
+  flex: 1 1 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--gonaj-muted);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  cursor: pointer;
+}
+
+.gonaj-tabs [role="tab"][aria-selected="true"] {
+  background: var(--gonaj-surface);
+  color: var(--gonaj-ink);
+}
+
+.gonaj-results-list h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+
+.gonaj-results-list ul {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.gonaj-results-list li {
+  margin: 0 0 0.4rem;
+}
+
+.gonaj-results-list li button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 14px;
+  color: var(--gonaj-ink);
+  background: var(--gonaj-surface);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+}
+
+.gonaj-results-list li button:hover {
+  background: var(--gonaj-sage);
+}
+
+.gonaj-route-name {
+  display: block;
+  font-weight: 600;
+}
+
+.gonaj-route-meta {
+  display: block;
+  color: var(--gonaj-muted);
+  font-size: 12px;
+  margin-top: 0.1rem;
+}
+
+.gonaj-pager {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.gonaj-pager button {
+  font: inherit;
+  font-size: 13px;
+  color: var(--gonaj-ink);
+  background: var(--gonaj-surface);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+
+.gonaj-pager button:disabled {
+  color: var(--gonaj-muted);
+  cursor: default;
+}
+
+.gonaj-pager button:not(:disabled):hover {
+  background: var(--gonaj-sage);
+}
+
+.gonaj-pager span {
+  flex: 1 1 auto;
+  text-align: center;
+  color: var(--gonaj-muted);
+  font-size: 12px;
+}
+
+.gonaj-group-members {
+  list-style: none;
+  margin: 0.35rem 0 0.5rem;
+  padding-left: 1rem;
+}
+
+.gonaj-area-note {
+  background: var(--gonaj-surface);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0 0;
+}
+
+.gonaj-area-note--warn {
+  background: var(--gonaj-amber-wash);
+  border-color: var(--gonaj-amber);
+}
+
+.gonaj-overlay h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0.75rem 0 0.25rem;
+}
+
+.gonaj-overlay ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gonaj-overlay ul button {
+  font: inherit;
+  color: var(--gonaj-green-dark);
+  background: none;
+  border: none;
+  padding: 0.15rem 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.gonaj-overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1200;
+  width: min(400px, 100%);
+  overflow-y: auto;
+  background: var(--gonaj-surface);
+  border-left: 1px solid var(--gonaj-line);
+  box-shadow: -4px 0 16px rgba(23, 32, 28, 0.15);
+  padding: 1rem 1.25rem 2rem;
+}
+
+.gonaj-overlay h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0.5rem 0;
+  border-left: 4px solid var(--gonaj-green);
+  padding-left: 0.5rem;
+}
+
+.gonaj-overlay > button {
+  font: inherit;
+  color: var(--gonaj-ink);
+  background: var(--gonaj-surface);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+}
+
+.gonaj-overlay > button:hover {
+  background: var(--gonaj-sage);
+}
+
+.gonaj-overlay dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.gonaj-overlay dt {
+  color: var(--gonaj-muted);
+}
+
+.gonaj-overlay dd {
+  margin: 0;
+}
+
+.gonaj-overlay dt {
+  color: var(--gonaj-muted);
+}
+
+.gonaj-timeline {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.gonaj-timeline li {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+  font-size: 14px;
+}
+
+.gonaj-tl-gutter {
+  flex: none;
+  width: 13px;
+  position: relative;
+}
+
+.gonaj-tl-gutter::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.3em;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--gonaj-surface);
+  border: 2px solid var(--gonaj-green);
+}
+
+.gonaj-tl-gutter::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 1.1em;
+  bottom: -0.45em;
+  width: 3px;
+  background: var(--gonaj-line);
+}
+
+.gonaj-timeline li:last-child .gonaj-tl-gutter::after {
+  display: none;
+}
+
+.gonaj-timeline li.is-origin .gonaj-tl-gutter::before,
+.gonaj-timeline li.is-terminus .gonaj-tl-gutter::before {
+  background: var(--gonaj-green);
+}
+
+.gonaj-overlay li {
+  padding: 0.15rem 0;
+}
+
+.gonaj-dock {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  padding: clamp(0.5rem, 1vw, 0.9rem) clamp(0.75rem, 2vw, 1.5rem);
+  background: var(--gonaj-surface);
+  border-top: 1px solid var(--gonaj-line);
+}
+
+.gonaj-dock p {
+  margin: 0;
+  flex: 1 1 12rem;
+}
+
+.gonaj-dock h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+  display: inline-block;
+}
+
+.gonaj-dock .gonaj-tag {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gonaj-green-dark);
+  background: var(--gonaj-sage);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.gonaj-dock button {
+  font: inherit;
+  font-weight: 600;
+  color: var(--gonaj-surface);
+  background: var(--gonaj-green);
+  border: none;
+  border-radius: var(--gonaj-radius);
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+
+.gonaj-tiles-notice {
+  background: var(--gonaj-amber-wash);
+  border: 1px solid var(--gonaj-amber);
+  border-radius: var(--gonaj-radius);
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0 0;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--gonaj-green);
+  outline-offset: 1px;
+}
+
+@media (max-width: 48rem) {
+  .gonaj-header {
+    padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+  }
+
+  .gonaj-body {
+    flex-direction: column;
+    padding: 0.75rem;
+  }
+
+  .gonaj-results {
+    max-width: none;
+  }
+
+  .gonaj-map-container {
+    height: 20rem;
+  }
+
+  .gonaj-map-wrap {
+    flex: none;
+    height: 38dvh;
+  }
+
+  .gonaj-results {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+
+  .gonaj-dock {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .gonaj-dock p {
+    flex: none;
+  }
+
+  .gonaj-dock button {
+    width: 100%;
+  }
+
+  .gonaj-overlay {
+    position: fixed;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 70dvh;
+    border-left: none;
+    border-top: 1px solid var(--gonaj-line);
+    border-radius: var(--gonaj-radius) var(--gonaj-radius) 0 0;
+    box-shadow: 0 -4px 16px rgba(23, 32, 28, 0.15);
+  }
+
+}
