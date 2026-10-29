@@ -8,7 +8,8 @@ are never exposed.
 """
 import math
 
-from django.db.models import F, OuterRef, Q, Subquery
+from django.db.models import F, OuterRef, Q, Subquery, Value
+from django.db.models.functions import Coalesce, NullIf, Trim
 from rest_framework.decorators import (
     api_view,
     authentication_classes,
@@ -81,6 +82,35 @@ def routes_with_master_fields(queryset):
     )
 
 
+def endpoint_stop_name(ordering):
+    """Name of the first/last ordered stop of a route (006)."""
+    return Subquery(
+        RouteStopMembership.objects.filter(route=OuterRef("pk"))
+        .order_by(ordering)
+        .values("stop__name")[:1]
+    )
+
+
+def routes_with_endpoint_names(queryset):
+    """Resolved origin/destination: stored text wins (006).
+
+    Null, empty, and whitespace-only stored text counts as
+    absent and falls back to the endpoint stop names; routes
+    without stops resolve to null (never invented).
+    """
+    blank = Value("")
+    return queryset.annotate(
+        resolved_origin=Coalesce(
+            NullIf(Trim("from_text"), blank),
+            endpoint_stop_name("position"),
+        ),
+        resolved_destination=Coalesce(
+            NullIf(Trim("to_text"), blank),
+            endpoint_stop_name("-position"),
+        ),
+    )
+
+
 def paginated_response(queryset, request, serializer_class, extra=None):
     paginator = SharedEnvelopePagination()
     page = paginator.paginate_queryset(queryset, request)
@@ -122,7 +152,9 @@ def route_list(request):
     operator = request.query_params.get("operator")
     network = request.query_params.get("network")
 
-    queryset = routes_with_master_fields(servable_routes())
+    queryset = routes_with_endpoint_names(
+        routes_with_master_fields(servable_routes())
+    )
     if search:
         queryset = queryset.filter(
             Q(name__icontains=search)
@@ -155,7 +187,9 @@ def route_detail(request, pk):
     """Route detail with ordered stops (FR-013–FR-015)."""
     try:
         route = (
-            routes_with_master_fields(servable_routes())
+            routes_with_endpoint_names(
+                routes_with_master_fields(servable_routes())
+            )
             .distinct()
             .get(pk=pk)
         )
@@ -186,8 +220,8 @@ def route_detail(request, pk):
     payload = {
         "id": route.id,
         "name": route.name,
-        "origin": route.from_text,
-        "destination": route.to_text,
+        "resolved_origin": route.resolved_origin,
+        "resolved_destination": route.resolved_destination,
         "operator": route.operator,
         "network": route.network,
         "stops": steps,
@@ -338,7 +372,9 @@ def connectivity(request):
         route=OuterRef("pk"), stop_id=to_id
     )
     queryset = (
-        routes_with_master_fields(servable_routes())
+        routes_with_endpoint_names(
+            routes_with_master_fields(servable_routes())
+        )
         .annotate(
             from_position=Subquery(
                 origin_memberships.values("position")[:1]
@@ -358,8 +394,8 @@ def connectivity(request):
         {
             "id": r.id,
             "name": r.name,
-            "origin": r.from_text,
-            "destination": r.to_text,
+            "resolved_origin": r.resolved_origin,
+            "resolved_destination": r.resolved_destination,
             "operator": r.operator,
             "network": r.network,
             "from_position": r.from_position,

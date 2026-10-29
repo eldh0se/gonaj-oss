@@ -13,8 +13,10 @@ from apps.transport.models import Route, Stop
 class RouteListSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField(allow_null=True)
-    origin = serializers.CharField(source="from_text", allow_null=True)
-    destination = serializers.CharField(source="to_text", allow_null=True)
+    origin = serializers.CharField(
+        source="resolved_origin", allow_null=True)
+    destination = serializers.CharField(
+        source="resolved_destination", allow_null=True)
     operator = serializers.CharField(allow_null=True)
     network = serializers.CharField(allow_null=True)
 
@@ -35,8 +37,10 @@ class RouteStopStepSerializer(serializers.Serializer):
 class RouteDetailSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField(allow_null=True)
-    origin = serializers.CharField(source="from_text", allow_null=True)
-    destination = serializers.CharField(source="to_text", allow_null=True)
+    origin = serializers.CharField(
+        source="resolved_origin", allow_null=True)
+    destination = serializers.CharField(
+        source="resolved_destination", allow_null=True)
     operator = serializers.CharField(allow_null=True)
     network = serializers.CharField(allow_null=True)
     stops = RouteStopStepSerializer(many=True)
@@ -59,8 +63,10 @@ class StopDetailSerializer(serializers.Serializer):
 class ConnectivityResultSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField(allow_null=True)
-    origin = serializers.CharField(source="from_text", allow_null=True)
-    destination = serializers.CharField(source="to_text", allow_null=True)
+    origin = serializers.CharField(
+        source="resolved_origin", allow_null=True)
+    destination = serializers.CharField(
+        source="resolved_destination", allow_null=True)
     operator = serializers.CharField(allow_null=True)
     network = serializers.CharField(allow_null=True)
     from_position = serializers.IntegerField()

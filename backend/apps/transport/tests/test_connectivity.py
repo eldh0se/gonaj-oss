@@ -101,3 +101,39 @@ class ConnectivityTests(ApiTestCase):
             {"count", "results", "total_pages", "current_page",
              "page_size"},
         )
+
+
+class EndpointFallbackConnectivityTests(ApiTestCase):
+    """006 US2: connectivity serves the identical fallback."""
+
+    @classmethod
+    def setUpTestData(cls):
+        _, cls.import_run = f.make_snapshot(label="factory-endpoint-conn")
+        cls.master = f.make_master(cls.import_run, 97, "M")
+        cls.x = f.make_stop(cls.import_run, 971, "X Junction", 10.0, 76.3)
+        cls.z = f.make_stop(cls.import_run, 972, "Z Terminus", 10.02, 76.32)
+        cls.tagless = f.make_route(cls.import_run, 971, "Untagged X-Z")
+        f.link_master(cls.import_run, cls.master, cls.tagless, 1)
+        f.link_stop(cls.import_run, cls.tagless, cls.x, 1)
+        f.link_stop(cls.import_run, cls.tagless, cls.z, 2)
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_connectivity_serves_endpoint_names(self):
+        body = self.client.get("/api/v1/connectivity/", {
+            "from": self.x.id, "to": self.z.id}).json()
+        self.assertEqual(body["count"], 1)
+        row = body["results"][0]
+        self.assertEqual(row["id"], self.tagless.id)
+        self.assertEqual(
+            (row["origin"], row["destination"]),
+            ("X Junction", "Z Terminus"))
+
+    def test_evidence_detail_agrees_with_connectivity_row(self):
+        row = self.client.get("/api/v1/connectivity/", {
+            "from": self.x.id, "to": self.z.id}).json()["results"][0]
+        detail = self.client.get(row["evidence"]).json()
+        self.assertEqual(
+            (row["origin"], row["destination"]),
+            (detail["origin"], detail["destination"]))
