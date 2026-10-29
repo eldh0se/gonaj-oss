@@ -245,6 +245,12 @@
   font-size: 12px;
 }
 
+.gonaj-group-members {
+  list-style: none;
+  margin: 0.35rem 0 0.5rem;
+  padding-left: 1rem;
+}
+
 .gonaj-area-note {
   background: var(--gonaj-surface);
   border: 1px solid var(--gonaj-line);

@@ -5,6 +5,23 @@ export function routeLabel(route) {
   return `${route.origin ?? "?"} — ${route.destination ?? "?"}`;
 }
 
+// Same-named stops collapse into one entry, order preserved.
+function groupStopsByName(stops) {
+  const groups = [];
+  const byName = new Map();
+  for (const stop of stops) {
+    const key = stop.name ?? "";
+    let group = byName.get(key);
+    if (!group) {
+      group = { name: key === "" ? "Unnamed stop" : key, members: [] };
+      byName.set(key, group);
+      groups.push(group);
+    }
+    group.members.push(stop);
+  }
+  return groups;
+}
+
 const emptyList = { items: [], page: 1, totalPages: 1, count: 0 };
 
 function Pager({ kind, list, onPage }) {
@@ -52,12 +69,18 @@ export default function ResultsList({
   onStopPage,
 }) {
   const [tab, setTab] = useState("routes");
+  const [expanded, setExpanded] = useState(null);
 
   // When only one side has results, show it without asking.
   useEffect(() => {
     if (routeList.items.length > 0 && stopList.items.length === 0) setTab("routes");
     else if (stopList.items.length > 0 && routeList.items.length === 0) setTab("stops");
   }, [routeList, stopList]);
+
+  // Collapse groups whenever the result set changes.
+  useEffect(() => {
+    setExpanded(null);
+  }, [stopList]);
 
   if (state === "loading") {
     return <p role="status">Searching…</p>;
@@ -132,13 +155,41 @@ export default function ResultsList({
         <section aria-label="Matching stops">
           <h2>Stops</h2>
           <ul>
-            {stopList.items.map((stop) => (
-              <li key={stop.id}>
-                <button type="button" onClick={() => onSelectStop?.(stop)}>
-                  {stop.name}
-                </button>
-              </li>
-            ))}
+            {groupStopsByName(stopList.items).map((group) =>
+              group.members.length === 1 ? (
+                <li key={group.members[0].id}>
+                  <button type="button" onClick={() => onSelectStop?.(group.members[0])}>
+                    {group.members[0].name}
+                  </button>
+                </li>
+              ) : (
+                <li key={`group-${group.name}`}>
+                  <button
+                    type="button"
+                    aria-expanded={expanded === group.name}
+                    onClick={() =>
+                      setExpanded((current) => (current === group.name ? null : group.name))
+                    }
+                  >
+                    <span className="gonaj-route-name">{group.name}</span>
+                    <span className="gonaj-route-meta">
+                      {group.members.length} stops
+                    </span>
+                  </button>
+                  {expanded === group.name && (
+                    <ul className="gonaj-group-members">
+                      {group.members.map((stop) => (
+                        <li key={stop.id}>
+                          <button type="button" onClick={() => onSelectStop?.(stop)}>
+                            {stop.name}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              )
+            )}
           </ul>
           <Pager kind="stops" list={stopList} onPage={onStopPage} />
         </section>

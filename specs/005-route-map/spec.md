@@ -8,6 +8,15 @@
 
 **Input**: User description: "design 005 as one page with two views (map-browse + route detail overlay), with the chat panel specified to dock into that same page. That keeps the page count at one, satisfies all existing references, and leaves room to split into real routes later if the UI grows."
 
+## Clarifications
+
+### Session 2026-10-29
+
+- Q: When several stops share one name in the results, what should the Stops tab show? → A: Grouped row + expand (one row per name with stop count; tapping expands the matching stops inline to pick from).
+- Q: When the passenger picks one stop from an expanded group, what should happen? → A: Centre + panel (identical to picking any single stop: map centres, detail opens in the shared panel).
+- Q: Should the same grouping apply to map markers, or stay limited to the rail list? → A: Rail only (map keeps one marker per stop; zooming separates same-named stops).
+- Q: How should grouped rows count toward paging and the stops total? → A: Page stops, group in page (groups form from the current page; counts show envelope totals; API paging untouched).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Browse stops and routes on the map (Priority: P1)
@@ -190,6 +199,10 @@ activating it sends no request and stores nothing.
 - What happens on a small screen? The map, overlay, search,
   and dock reflow to a single column; no control is
   unreachable and no content requires horizontal scrolling.
+- What happens when several stops share a name? The rail
+  collapses them into one grouped row (map markers stay
+  one-per-stop; zooming separates them), so grouping never
+  hides a boarding point from the map.
 
 ## Requirements *(mandatory)*
 
@@ -218,7 +231,13 @@ activating it sends no request and stores nothing.
   only. Blank search MUST browse all; matching nothing MUST
   say so plainly with a spelling-or-browse hint. The rail
   MUST show result counts with page navigation for routes
-  and stops independently.
+  and stops independently. Stops sharing a name MUST
+  collapse into one grouped row showing the stop count,
+  expanding inline into pickable member rows; picking a
+  member MUST centre the map and open its detail exactly
+  as a single stop pick does. Groups MUST form within the
+  fetched page only; the stops count MUST show the envelope
+  total and API paging MUST stay untouched.
 - **FR-006**: The route detail overlay MUST show the route's
   name, origin, destination, operator, and network; its stops
   in travelling order with origin and terminus marked; and

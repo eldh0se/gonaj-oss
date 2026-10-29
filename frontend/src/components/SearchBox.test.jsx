@@ -119,6 +119,41 @@ describe("ResultsList", () => {
     expect(screen.getByRole("tab", { name: "Routes" }).getAttribute("aria-selected")).toBe("true");
   });
 
+  it("groups same-named stops with inline expand and member pick", () => {
+    const onSelectStop = vi.fn();
+    const dupes = [
+      { id: 201, name: "Aluva", name_ml: null, lat: 10.11, lon: 76.35 },
+      { id: 202, name: "Aluva", name_ml: null, lat: 10.12, lon: 76.36 },
+      { id: 203, name: "Aluva", name_ml: null, lat: 10.13, lon: 76.37 },
+      { id: 204, name: "Angamaly", name_ml: null, lat: 10.2, lon: 76.4 },
+    ];
+    render(
+      <ResultsList
+        routeList={EMPTY_LIST}
+        stopList={{ items: dupes, page: 1, totalPages: 1, count: 4 }}
+        state="ok"
+        errorDetail=""
+        onSelectRoute={() => {}}
+        onSelectStop={onSelectStop}
+      />
+    );
+    // Auto-switched to the stops tab; one grouped row, members hidden.
+    const group = screen.getByRole("button", { name: /Aluva.*3 stops/ });
+    expect(group.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryAllByRole("button", { name: "Aluva" })).toHaveLength(0);
+    // Single stops render directly, never grouped.
+    expect(screen.getByRole("button", { name: "Angamaly" })).toBeTruthy();
+    // Expand, pick the middle member, collapse again.
+    fireEvent.click(group);
+    expect(group.getAttribute("aria-expanded")).toBe("true");
+    const members = screen.getAllByRole("button", { name: "Aluva" });
+    expect(members).toHaveLength(3);
+    fireEvent.click(members[1]);
+    expect(onSelectStop).toHaveBeenCalledWith(dupes[1]);
+    fireEvent.click(screen.getByRole("button", { name: /Aluva.*3 stops/ }));
+    expect(screen.queryAllByRole("button", { name: "Aluva" })).toHaveLength(0);
+  });
+
   it("shows page info with independent prev/next per tab", () => {
     const onRoutePage = vi.fn();
     const onStopPage = vi.fn();

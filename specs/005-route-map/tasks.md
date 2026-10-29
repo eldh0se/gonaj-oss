@@ -155,6 +155,8 @@
 - [X] T029 Rebuild the timeline with a dedicated gutter column, remove the dead overlay-list rule, and add mobile header top padding with safe-area support in `frontend/src/App.css`, `frontend/src/components/RouteOverlay.jsx`, and `frontend/src/components/RouteOverlay.test.jsx`
 - [X] T030 Show result counts with independent prev/next paging per rail tab, refetching the 003 page on navigation, in `frontend/src/App.jsx`, `frontend/src/components/ResultsList.jsx`, `frontend/src/App.css`, and `frontend/src/components/SearchBox.test.jsx`
 - [X] T031 Move the search box from the header to a sticky position atop the rail tabs in `frontend/src/App.jsx`, `frontend/src/App.css`, and `specs/005-route-map/spec.md`
+- [X] T032 [P] Tests for same-name stop grouping (grouped row with count, inline expand/collapse, member pick centres+opens, pager/counts unchanged) in `frontend/src/components/SearchBox.test.jsx`
+- [X] T033 Implement rail-only stop grouping with expandable rows and member styling in `frontend/src/components/ResultsList.jsx` and `frontend/src/App.css`, then run the full suite and build green
 
 ---
 
