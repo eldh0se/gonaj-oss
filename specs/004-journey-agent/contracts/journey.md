@@ -39,7 +39,7 @@ the plain-language `400`.
   "boarding_stop": { "id": 101, "name": "Ernakulam South" },
   "alighting_stop": { "id": 118, "name": "Fort Kochi" },
   "routes": [
-    { "id": 17, "name": "Ernakulam — Fort Kochi", "evidence": "/api/v1/routes/17/" }
+    { "id": 17, "name": "Ernakulam — Fort Kochi", "evidence": "/routes/17" }
   ],
   "meta": { "model": "muse-spark-1.3", "provider": "meta", "latency_ms": 1240 }
 }
@@ -49,8 +49,9 @@ the plain-language `400`.
   the direct service. It contains no times, durations,
   frequencies, or transfers — the verifier guarantees it.
 - Every entry in `routes` was confirmed to serve both stops in
-  travelling order; every `evidence` URL resolves to a `200`
-  route detail.
+  travelling order; every `evidence` URL is a frontend
+  `/routes/:id` address (the 005 map page with the detail
+  overlay), never an `/api/v1/` URL.
 - `meta.model` is the declared model (or `none` for the
   fallback), `meta.provider` its provider (or
   `local-fallback`), `meta.latency_ms` the measured producing
@@ -116,7 +117,8 @@ stops; empty areas return `empty`.
 | `to_stop_id` | integer, required | Alighting stop id (must differ) |
 
 Returns direct routes serving both stops in order
-(`from_position < to_position`), each with `evidence`.
+(`from_position < to_position`), each with `evidence` (a
+frontend `/routes/:id` address).
 Empty list when unconnected; error when ids are unknown.
 
 ### `get_route_detail`

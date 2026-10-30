@@ -34,6 +34,11 @@ responses.
 4. Ask about two stops with no direct service — expect `200`,
    `status: "refuse"`, a plain-language message, and nothing
    invented.
+5. In the Journey tab, pick From and To stops and search —
+   expect the matching direct services with `/routes/:id`
+   evidence links and a selected style on both inputs; then
+   ask a question and confirm the direct-search results clear
+   (and vice versa), so only one answer is ever visible.
 
 ## 2. Disambiguation (Story 2)
 

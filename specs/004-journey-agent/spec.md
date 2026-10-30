@@ -51,6 +51,11 @@ and confirm an honest refusal with no invented service.
    passenger reads it, **Then** it names the resolved boarding
    and alighting stops in plain words alongside the route
    evidence, so the passenger can see what the helper understood.
+6. **Given** the Journey tab, **When** the passenger picks From
+   and To stops and searches, **Then** matching direct services
+   list with `/routes/:id` evidence links (or a plain
+   no-service message), and starting one search clears the
+   other search's results so only one answer is ever visible.
 
 ---
 
@@ -252,6 +257,16 @@ request.
   and alighting stops in plain words alongside the route evidence
   (Story 1/AC5), so the passenger can see what the helper
   understood and catch a misresolution before travelling.
+- **FR-022**: The Journey tab MUST offer From and To stop pickers
+  that resolve names against the application's own stop data
+  and query the public `GET /api/v1/connectivity/` endpoint. A
+  picked stop stays shown in its own input with a selected
+  style and an inline clear control; typing again clears the
+  selection (Story 1/AC6).
+- **FR-023**: The Journey panel MUST keep a single shared result
+  area for both search modes: starting one search clears the
+  other's results and cancels its in-flight request, so only
+  one answer is ever visible at a time (Story 1/AC6).
 
 ### Key Entities *(include if feature involves data)*
 

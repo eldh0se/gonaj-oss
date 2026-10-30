@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  getConnectivity,
   getRoute,
   getStop,
   listAllStops,
@@ -44,6 +45,18 @@ describe("api/client", () => {
     await listStops({});
     expect(fetch.mock.calls[1][0]).not.toContain("search=");
     expect(fetch.mock.calls[1][0]).not.toContain("bbox=");
+  });
+
+  it("queries direct connectivity by stop ids", async () => {
+    const fetch = vi.fn(async () =>
+      jsonResponse({ count: 1, results: [], total_pages: 1 })
+    );
+    vi.stubGlobal("fetch", fetch);
+    await getConnectivity(11, 18);
+    const url = fetch.mock.calls[0][0];
+    expect(url).toContain("/api/v1/connectivity/");
+    expect(url).toContain("from=11");
+    expect(url).toContain("to=18");
   });
 
   it("caps page size at 100", async () => {

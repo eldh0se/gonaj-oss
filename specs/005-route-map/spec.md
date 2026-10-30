@@ -146,35 +146,31 @@ same overlay opens.
 
 ---
 
-### User Story 4 - See where the journey chat will live (Priority: P2)
+### User Story 4 - Find the journey chat in the rail (Priority: P2)
 
-A passenger notices the journey-helper entry point docked into
-the same page. It is clearly marked as coming soon and does
-nothing yet — it takes no input, makes no calls, and collects
-nothing — so the layout is ready for the 004 panel without
-shipping a dead control that pretends to work.
+A passenger notices the Journey tab alongside Routes and Stops
+in the same rail. The tab hosts the 004 journey helper panel,
+so asking for a direct service lives where discovery results
+already live — no separate dock, no extra page.
 
 **Why this priority**: The 004 chat panel needs a specified
-home; reserving the dock now keeps 004's implementation to
-filling the slot rather than redesigning the page, while
-honesty about its state avoids shipping a control that misleads.
+home; the rail tab keeps 004's implementation to filling the
+slot rather than redesigning the page.
 
-**Independent Test**: Open the map page and confirm the chat
-dock region is present, labelled as coming soon, and inert:
-activating it sends no request and stores nothing.
+**Independent Test**: Open the map page and confirm the Journey
+tab is present next to Routes and Stops; select it and confirm
+the journey helper panel appears.
 
 **Acceptance Scenarios**:
 
-1. **Given** the map page, **When** it loads, **Then** a chat
-   dock region is present in the layout, visibly labelled as
-   the future journey helper and marked coming soon.
-2. **Given** the dock's entry control, **When** the passenger
-   activates it, **Then** nothing is sent anywhere, no input
-   is collected, and the control plainly states the helper is
-   not available yet.
-3. **Given** the dock region, **When** a reviewer inspects
-   network traffic while activating it, **Then** zero requests
-   are made and zero data is stored.
+1. **Given** the map page, **When** it loads, **Then** a Journey
+   tab is present in the rail alongside Routes and Stops.
+2. **Given** the Journey tab, **When** the passenger selects
+   it, **Then** the journey helper panel appears in the rail,
+   whether or not search results exist.
+3. **Given** the Routes or Stops tabs, **When** the passenger
+   uses them, **Then** paging, grouping, and auto-open behave
+   exactly as without the Journey tab.
 
 ---
 
@@ -246,11 +242,11 @@ activating it sends no request and stores nothing.
   successfully with an explicit no-stops-recorded statement.
   An unknown route identifier MUST report a plain-language
   not-found state, with no technical details exposed.
-- **FR-008**: The layout MUST include the journey-chat dock
-  region on the same page, visibly labelled as the future
-  journey helper and marked coming soon. The dock's control
-  MUST be inert: activating it sends no request, collects no
-  input, and stores nothing.
+- **FR-008**: The rail MUST include a Journey tab
+  alongside Routes and Stops, hosting the 004 journey helper
+  panel. The tab MUST be reachable with or without search
+  results and MUST NOT alter route/stop paging, grouping, or
+  auto-open behavior.
 - **FR-009**: Map imagery MUST come from the public tile
   service only, with required attribution, appropriate
   self-identification, no bulk or prefetch downloading, and a
@@ -282,12 +278,11 @@ activating it sends no request and stores nothing.
   the viewport with no page scroll: brand header on top,
   map plus results rail in the middle (the rail scrolls
   internally with a sticky search box pinned above its
-  tabs, the map fills its area), and the chat dock as
-  a slim always-visible footer bar marked with a "Coming
-  soon" tag, with the title and padding scaling
-  proportionally within fixed bounds. The rail MUST present
-  routes and stops as user-selectable tabs, opening directly
-  on whichever side holds results. Route and stop details MUST share one right-side
+  tabs, the map fills its area), with the title and padding
+  scaling proportionally within fixed bounds. The rail MUST
+  present routes, stops, and the journey helper as
+  user-selectable tabs, opening directly on whichever side
+  holds results. Route and stop details MUST share one right-side
   detail panel over the rail on wide screens and one bottom
   sheet on small screens, with route detail taking
   precedence when both apply.
@@ -334,9 +329,10 @@ activating it sends no request and stores nothing.
   `/routes/:id` addresses opened directly land on the map
   page with the correct overlay, and 100% of unknown ids
   show the plain-language not-found state.
-- **SC-004**: The chat dock is present and labelled coming
-  soon on 100% of page loads, and activating it produces 0
-  requests and 0 stored bytes in 100% of checks.
+- **SC-004**: The Journey tab is present on 100% of page
+  loads, opens the helper panel with or without results, and
+  leaves routes/stops paging, grouping, and auto-open
+  unchanged in 100% of checks.
 - **SC-005**: With tile imagery blocked, 100% of marker,
   list, search, and detail flows still complete over a plain
   background with the imagery notice shown.
@@ -359,15 +355,14 @@ activating it sends no request and stores nothing.
 - The `/routes/:id` address convention matches the evidence
   links the 004 journey helper will emit; this feature builds
   the destination those links need, and the 004 panel later
-  fills the dock specified here (FR-008).
+  fills the Journey tab specified here (FR-008).
 - One page with an overlay is the whole information
   architecture for this feature; splitting the overlay into a
   separate route page later is explicitly allowed but out of
   scope now.
-- The chat dock is intentionally inert in this feature: it
-  reserves layout and communicates the roadmap, and the
-  interactive helper arrives with 004 — no model, voice, or
-  AI behaviour is specified or built here.
+- The Journey tab hosts the interactive helper that
+  arrives with 004 — no model, voice, or AI behaviour is
+  specified or built here.
 - Tile-provider choice (default public tiles) and the
   oversized-area threshold are inherited from the read API
   and constitution; this spec fixes UI behaviour, not those

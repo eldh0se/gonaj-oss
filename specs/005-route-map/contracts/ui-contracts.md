@@ -56,11 +56,12 @@ source decision.
 - `SearchBox`: in — nothing (owns its input); out —
   debounced query strings. No external calls.
 - `ResultsList`: in — route/stop candidates + states
-  (loading, empty, no-match, error); out — selections.
+  (loading, empty, no-match, error) plus journey content;
+  out — selections and tab changes.
 - `RouteOverlay`: in — route detail payload or
   loading/empty/not-found state; out — dismiss.
-- `ChatDock`: in — nothing; out — nothing (inert by
-  contract: zero requests, zero storage on activation).
+- Journey tab content (004): the journey panel; out — nothing
+  to the rail (it calls the journey endpoints itself).
 - `api/client.js`: the single module allowed to call the
   read API; every other module receives data as props.
 

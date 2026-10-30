@@ -50,6 +50,23 @@ export POSTGRES_PORT=5432
 naming the variable. Optional overrides: `DJANGO_DEBUG` (default `1`),
 `DJANGO_ALLOWED_HOSTS` (default `localhost,127.0.0.1`).
 
+For the journey helper (`specs/004-journey-agent`), also export your
+Meta model key server-side only — never commit it, never put it in
+frontend code:
+
+```sh
+export MODEL_API_KEY=your-meta-api-key
+```
+
+Without it the server still starts and the test suite stays green
+(model calls are stubbed in tests), but live journey and transcribe
+requests return the plain-language cannot-answer message. Optional
+overrides: `JOURNEY_MODEL` (default `muse-spark-1.3`),
+`JOURNEY_MODEL_PROVIDER` (default `meta`), `TRANSCRIBE_MODEL`
+(default `muse-voice-transcribe-1.0`), `MODEL_API_BASE_URL`
+(default `https://api.meta.ai/v1`), `MODEL_TIMEOUT_SECONDS`
+(default `20`).
+
 ## 4. Start the database
 
 ```sh

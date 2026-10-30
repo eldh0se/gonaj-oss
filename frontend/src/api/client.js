@@ -88,6 +88,13 @@ export function getStop(id, opts) {
   return request(`/stops/${encodeURIComponent(id)}/`, opts);
 }
 
+export function getConnectivity(fromId, toId, opts) {
+  return request(
+    `/connectivity/${params({ from: fromId, to: toId })}`,
+    opts
+  );
+}
+
 // Follow every page until the envelope's `count` is satisfied, so the
 // marker set is never a partial page. Safe to page through because
 // oversized areas return zero stops by contract.

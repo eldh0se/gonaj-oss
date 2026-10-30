@@ -142,8 +142,8 @@ frontend/
 └── src/
     ├── components/
     │   └── JourneyPanel.jsx       # NEW: chat, evidence links, unverified label, voice button
-    └── services/
-        └── journey.js             # NEW: REST client for journey + transcribe (no model calls)
+    └── api/
+        └── journey.js             # NEW: REST client for journey + transcribe (no model calls; lives in api/ per the 005 convention, not services/)
 ```
 
 **Structure Decision**: The helper is a new `apps/journey/` app
