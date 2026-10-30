@@ -67,15 +67,18 @@ export default function ResultsList({
   onSelectStop,
   onRoutePage,
   onStopPage,
+  journeyContent = null,
 }) {
-  const [tab, setTab] = useState("routes");
+  const [tab, setTab] = useState(journeyContent ? "journey" : "routes");
   const [expanded, setExpanded] = useState(null);
 
   // When only one side has results, show it without asking.
+  // Never pulls the passenger away from the Journey tab.
   useEffect(() => {
+    if (tab === "journey") return;
     if (routeList.items.length > 0 && stopList.items.length === 0) setTab("routes");
     else if (stopList.items.length > 0 && routeList.items.length === 0) setTab("stops");
-  }, [routeList, stopList]);
+  }, [routeList, stopList, tab]);
 
   // Collapse groups whenever the result set changes.
   useEffect(() => {
@@ -100,13 +103,25 @@ export default function ResultsList({
   }
   if (
     state !== "ok" ||
-    (routeList.items.length === 0 && stopList.items.length === 0)
+    (routeList.items.length === 0 &&
+      stopList.items.length === 0 &&
+      !journeyContent)
   ) {
     return null;
   }
   return (
     <div className="gonaj-results-list">
       <div role="tablist" aria-label="Result type" className="gonaj-tabs">
+        {journeyContent && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "journey"}
+            onClick={() => setTab("journey")}
+          >
+            Journey
+          </button>
+        )}
         <button
           type="button"
           role="tab"
@@ -124,6 +139,7 @@ export default function ResultsList({
           Stops
         </button>
       </div>
+      {tab === "journey" && journeyContent}
       {tab === "routes" && routeList.items.length > 0 && (
         <section aria-label="Matching routes">
           <h2>Routes</h2>

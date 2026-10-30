@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "apps.core",
     "apps.transport",
+    "apps.journey",
 ]
 
 MIDDLEWARE = [
@@ -126,3 +127,15 @@ CACHES = {
     }
 }
 TRANSPORT_TRUSTED_PROXY = env("TRANSPORT_TRUSTED_PROXY", "")
+
+# Journey helper model configuration (specs/004-journey-agent, FR-019).
+# The key stays server-side only: it appears in no response, log, or
+# frontend bundle. Empty default keeps management commands and the test
+# suite (which stubs the model client) runnable without a key; the
+# provider fails fast naming the variable on first real model use.
+MODEL_API_KEY = env("MODEL_API_KEY", "")
+JOURNEY_MODEL = env("JOURNEY_MODEL", "muse-spark-1.3")
+JOURNEY_MODEL_PROVIDER = env("JOURNEY_MODEL_PROVIDER", "meta")
+TRANSCRIBE_MODEL = env("TRANSCRIBE_MODEL", "muse-voice-transcribe-1.0")
+MODEL_API_BASE_URL = env("MODEL_API_BASE_URL", "https://api.meta.ai/v1")
+MODEL_TIMEOUT_SECONDS = float(env("MODEL_TIMEOUT_SECONDS", "20"))

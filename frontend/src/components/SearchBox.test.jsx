@@ -106,6 +106,40 @@ describe("ResultsList", () => {
     expect(card.textContent).toMatch(/Ernakulam → Fort Kochi/);
   });
 
+  it("hosts the journey helper under its own tab", () => {
+    const noop = () => {};
+    render(
+      <ResultsList routeList={EMPTY_LIST} stopList={STOP_LIST} state="ok" errorDetail="" onSelectRoute={noop} onSelectStop={noop} journeyContent={<p>Journey helper lives here</p>} />
+    );
+    expect(screen.getByRole("tab", { name: "Journey" })).toBeTruthy();
+    expect(screen.getByText("Journey helper lives here")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Routes" }));
+    expect(screen.queryByText("Journey helper lives here")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Journey" }));
+    expect(screen.getByText("Journey helper lives here")).toBeTruthy();
+  });
+
+  it("keeps the journey tab reachable with no search results", () => {
+    const noop = () => {};
+    render(
+      <ResultsList routeList={EMPTY_LIST} stopList={EMPTY_LIST} state="ok" errorDetail="" onSelectRoute={noop} onSelectStop={noop} journeyContent={<p>Journey helper lives here</p>} />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Journey" }));
+    expect(screen.getByText("Journey helper lives here")).toBeTruthy();
+  });
+
+  it("puts the Journey tab first and keeps it selected", () => {
+    const noop = () => {};
+    render(
+      <ResultsList routeList={ROUTE_LIST} stopList={STOP_LIST} state="ok" errorDetail="" onSelectRoute={noop} onSelectStop={noop} journeyContent={<p>Journey helper lives here</p>} />
+    );
+    const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(tabs).toEqual(["Journey", "Routes", "Stops"]);
+    expect(screen.getByRole("tab", { name: "Journey" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("tab", { name: "Routes" }));
+    expect(screen.getByRole("tab", { name: "Journey" }).getAttribute("aria-selected")).toBe("false");
+  });
+
   it("opens directly on the only side that has results", () => {
     const noop = () => {};
     const { rerender } = render(

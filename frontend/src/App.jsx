@@ -4,7 +4,7 @@ import MapView from "./components/MapView.jsx";
 import SearchBox from "./components/SearchBox.jsx";
 import ResultsList from "./components/ResultsList.jsx";
 import RouteOverlay from "./components/RouteOverlay.jsx";
-import ChatDock from "./components/ChatDock.jsx";
+import JourneyPanel from "./components/JourneyPanel.jsx";
 import {
   getRoute,
   getStop,
@@ -260,6 +260,7 @@ export function MapPage() {
             onSelectStop={handleSelectStop}
             onRoutePage={setRoutePage}
             onStopPage={setStopPage}
+            journeyContent={<JourneyPanel />}
           />
         </aside>
       </div>
@@ -304,8 +305,6 @@ export function MapPage() {
           </section>
         )
       )}
-
-      <ChatDock />
     </div>
   );
 }
