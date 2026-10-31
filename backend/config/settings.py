@@ -3,7 +3,9 @@
 All deployment-sensitive values come from the environment; missing
 required values fail fast naming the variable (spec edge case).
 """
+import logging
 import os
+import time
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -25,6 +27,58 @@ def env(name, default=_MISSING):
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 
 DEBUG = env("DJANGO_DEBUG", "1") == "1"
+
+
+def build_logging_config(debug):
+    """Mode-dependent logging configuration (007, FR-001-FR-003).
+
+    Debug mode emits everything (threshold DEBUG) for diagnosis;
+    production stays restrained (threshold INFO) so routine traffic
+    is silent while warnings and errors still surface. Output goes
+    to the captured standard streams only — retention and rotation
+    belong to the deployment environment.
+    """
+    level = "DEBUG" if debug else "INFO"
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "filters": {
+            "redact": {"()": "apps.core.redaction.RedactionFilter"},
+        },
+        "formatters": {
+            "triage": {
+                "format": "{asctime} {levelname} {name}: {message}",
+                "style": "{",
+                # Literal "Z": the wall time is UTC (converter below),
+                # and "%z" is avoided because it renders inconsistently
+                # across platforms when the converter is gmtime.
+                "datefmt": "%Y-%m-%dT%H:%M:%SZ",
+            },
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "filters": ["redact"],
+                "formatter": "triage",
+                "level": level,
+            },
+        },
+        "root": {"handlers": ["console"], "level": level},
+    }
+
+
+# Deterministic UTC timestamps so entries order across components
+# regardless of the machine's local timezone (FR-004).
+logging.Formatter.converter = time.gmtime
+
+LOGGING = build_logging_config(DEBUG)
+
+# FR-008: a failing log write MUST NOT break the request, command, or
+# response being processed. This holds because the configuration uses
+# only stdlib StreamHandler, whose emit() routes write failures to
+# handleError (reported, never re-raised). Add no custom handler with
+# a raising emit() path; backend/tests/test_logging.py locks this in.
+logging.raiseExceptions = True
 
 ALLOWED_HOSTS = env("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 

@@ -4,6 +4,8 @@ Every error across the transport API is a single plain-language
 sentence a passenger can act on. No field names, database messages,
 OSM identifiers, or stack details ever appear in a response body.
 """
+import logging
+
 from rest_framework import status
 from rest_framework.exceptions import APIException
 from rest_framework.views import exception_handler
@@ -33,6 +35,21 @@ class PlainMethodNotAllowed(APIException):
     )
 
 
+logger = logging.getLogger(__name__)
+
+
+def _request_context(context):
+    """Method + path for error records (FR-005).
+
+    Uses ``request.path`` (never the query string), so routine
+    records carry no user-supplied content at all.
+    """
+    request = context.get("request") if isinstance(context, dict) else None
+    if request is None:
+        return "?", "?"
+    return request.method, request.path
+
+
 def api_not_found(request, exception=None):
     """URL-resolver 404s under /api/* (T037).
 
@@ -45,6 +62,12 @@ def api_not_found(request, exception=None):
     from django.views.defaults import page_not_found
 
     if request.path.startswith("/api/"):
+        logger.warning(
+            "api client_error status=%d method=%s path=%s",
+            404,
+            request.method,
+            request.path,
+        )
         return JsonResponse(
             {
                 "detail": "We could not find what you asked for. "
@@ -83,4 +106,21 @@ def plain_exception_handler(exc, context):
             "Please try again in a little while."
         )
     response.data = {"detail": message}
+    method, path = _request_context(context)
+    if response.status_code >= 500:
+        logger.exception(
+            "api error status=%d method=%s path=%s",
+            response.status_code,
+            method,
+            path,
+        )
+    elif response.status_code == status.HTTP_429_TOO_MANY_REQUESTS or (
+        400 <= response.status_code < 500
+    ):
+        logger.warning(
+            "api client_error status=%d method=%s path=%s",
+            response.status_code,
+            method,
+            path,
+        )
     return response

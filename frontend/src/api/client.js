@@ -4,6 +4,8 @@
 // receives transit data as props. Envelopes are returned verbatim —
 // including `status`/`detail` on the stops list — so views can render
 // the `zoom_in` and `empty` outcomes exactly as contracted.
+import { debugLog } from "./debug.js";
+
 const API_BASE = "/api/v1";
 
 export const PAGE_SIZE_DEFAULT = 20;
@@ -19,11 +21,13 @@ export class ApiError extends Error {
 }
 
 async function request(path, { signal } = {}) {
+  const started = Date.now();
   let response;
   try {
     response = await fetch(`${API_BASE}${path}`, { signal });
   } catch (err) {
     if (err?.name === "AbortError") throw err;
+    debugLog("api", { path, outcome: "network-error" });
     throw new ApiError(
       0,
       "We could not reach the map service. Please check your connection and try again."
@@ -36,12 +40,22 @@ async function request(path, { signal } = {}) {
     body = null;
   }
   if (!response.ok) {
+    debugLog("api", {
+      path,
+      outcome: `http-${response.status}`,
+      duration_ms: Date.now() - started,
+    });
     const detail =
       body && typeof body.detail === "string"
         ? body.detail
         : "Something went wrong loading map data. Please try again.";
     throw new ApiError(response.status, detail);
   }
+  debugLog("api", {
+    path,
+    outcome: `http-${response.status}`,
+    duration_ms: Date.now() - started,
+  });
   return body;
 }
 

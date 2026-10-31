@@ -6,6 +6,7 @@ routes that belong to a master; every stop row is servable. The
 public ``id`` is the stored row's surrogate ``id``; OSM identifiers
 are never exposed.
 """
+import logging
 import math
 
 from django.db.models import F, OuterRef, Q, Subquery, Value
@@ -36,6 +37,8 @@ from .serializers import (
     StopListSerializer,
 )
 from .throttling import READ_THROTTLE_CLASSES
+
+logger = logging.getLogger(__name__)
 
 MAX_BBOX_SPAN_DEGREES = 0.5
 
@@ -176,7 +179,17 @@ def route_list(request):
             master_memberships__route_master__network=network
         ).distinct()
     queryset = order_routes(queryset).distinct()
-    return paginated_response(queryset, request, RouteListSerializer)
+    response = paginated_response(queryset, request, RouteListSerializer)
+    logger.debug(
+        "route_list search=%r operator=%r network=%r count=%d method=%s path=%s",
+        search,
+        operator,
+        network,
+        response.data["count"],
+        request.method,
+        request.path,
+    )
+    return response
 
 
 @api_view(["GET"])
@@ -194,6 +207,13 @@ def route_detail(request, pk):
             .get(pk=pk)
         )
     except (Route.DoesNotExist, Route.MultipleObjectsReturned, ValueError):
+        logger.debug(
+            "route_detail id=%s found=%s method=%s path=%s",
+            pk,
+            False,
+            request.method,
+            request.path,
+        )
         raise route_not_found()
     memberships = (
         RouteStopMembership.objects.filter(route=route)
@@ -226,6 +246,14 @@ def route_detail(request, pk):
         "network": route.network,
         "stops": steps,
     }
+    logger.debug(
+        "route_detail id=%s found=%s stops=%d method=%s path=%s",
+        route.id,
+        True,
+        len(steps),
+        request.method,
+        request.path,
+    )
     return Response(RouteDetailSerializer(payload).data)
 
 
@@ -271,7 +299,7 @@ def stop_list(request):
             max_lon - min_lon > MAX_BBOX_SPAN_DEGREES
             or max_lat - min_lat > MAX_BBOX_SPAN_DEGREES
         ):
-            return paginated_response(
+            response = paginated_response(
                 Stop.objects.none(),
                 request,
                 StopListSerializer,
@@ -283,6 +311,15 @@ def stop_list(request):
                     ),
                 },
             )
+            logger.debug(
+                "stop_list bbox=%r status=%s count=%d method=%s path=%s",
+                bbox,
+                "zoom_in",
+                response.data["count"],
+                request.method,
+                request.path,
+            )
+            return response
         queryset = Stop.objects.filter(
             lon__gte=min_lon,
             lon__lte=max_lon,
@@ -290,15 +327,33 @@ def stop_list(request):
             lat__lte=max_lat,
         ).order_by("name", "id")
         if not queryset.exists():
-            return paginated_response(
+            response = paginated_response(
                 queryset,
                 request,
                 StopListSerializer,
                 extra={"status": "empty"},
             )
-        return paginated_response(
+            logger.debug(
+                "stop_list bbox=%r status=%s count=%d method=%s path=%s",
+                bbox,
+                "empty",
+                response.data["count"],
+                request.method,
+                request.path,
+            )
+            return response
+        response = paginated_response(
             queryset, request, StopListSerializer, extra={"status": "ok"}
         )
+        logger.debug(
+            "stop_list bbox=%r status=%s count=%d method=%s path=%s",
+            bbox,
+            "ok",
+            response.data["count"],
+            request.method,
+            request.path,
+        )
+        return response
     queryset = Stop.objects.all()
     if not search_blank:
         queryset = queryset.filter(
@@ -306,9 +361,18 @@ def stop_list(request):
             | Q(name_ml__icontains=search.strip())
         )
     queryset = queryset.order_by("name", "id")
-    return paginated_response(
+    response = paginated_response(
         queryset, request, StopListSerializer, extra={"status": "ok"}
     )
+    logger.debug(
+        "stop_list search=%r status=%s count=%d method=%s path=%s",
+        (search or "").strip(),
+        "ok",
+        response.data["count"],
+        request.method,
+        request.path,
+    )
+    return response
 
 
 @api_view(["GET"])
@@ -320,22 +384,36 @@ def stop_detail(request, pk):
     try:
         stop = Stop.objects.get(pk=pk)
     except (Stop.DoesNotExist, ValueError):
+        logger.debug(
+            "stop_detail id=%s found=%s method=%s path=%s",
+            pk,
+            False,
+            request.method,
+            request.path,
+        )
         raise stop_not_found()
     serving = order_routes(
         routes_with_master_fields(servable_routes()).filter(
             stop_memberships__stop=stop
         )
     ).distinct()
+    serving_routes = [{"id": r.id, "name": r.name} for r in serving]
     payload = {
         "id": stop.id,
         "name": stop.name,
         "name_ml": stop.name_ml,
         "lat": stop.lat,
         "lon": stop.lon,
-        "serving_routes": [
-            {"id": r.id, "name": r.name} for r in serving
-        ],
+        "serving_routes": serving_routes,
     }
+    logger.debug(
+        "stop_detail id=%s found=%s serving_routes=%d method=%s path=%s",
+        stop.id,
+        True,
+        len(serving_routes),
+        request.method,
+        request.path,
+    )
     return Response(StopDetailSerializer(payload).data)
 
 
@@ -411,6 +489,14 @@ def connectivity(request):
     )
     paginator.page_size = min(requested_size, paginator.max_page_size)
     paginator.count = len(rows)
+    logger.debug(
+        "connectivity from_id=%d to_id=%d count=%d method=%s path=%s",
+        from_id,
+        to_id,
+        paginator.count,
+        request.method,
+        request.path,
+    )
     paginator.total_pages = (
         math.ceil(paginator.count / paginator.page_size)
         if paginator.count
