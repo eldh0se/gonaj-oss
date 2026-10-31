@@ -280,6 +280,119 @@ def _selection_meta(latency_ms):
     return meta
 
 
+UNKNOWN_OPERATOR = "Other services"
+
+
+def _rank_pairs(pairs, operators=None, names=None):
+    """Group verified pairs by operator; order (stop_count, route id).
+
+    Pure ranking over verified route pairs (no model): each pair is
+    ``{"route_id", "from_id", "to_id"}``. Returns
+    ``(groups, by_id)`` where ``by_id`` maps route ids to their
+    verified ``(route, from_id, to_id, from_name, to_name)`` tuples.
+    Unknown routes are skipped; ``operators``/``names`` override the
+    annotated values (used by tests).
+    """
+    operators = operators or {}
+    names = names or {}
+    grouped = {}
+    order = []
+    by_id = {}
+    for pair in pairs or []:
+        route_id = (pair or {}).get("route_id")
+        from_id = (pair or {}).get("from_id")
+        to_id = (pair or {}).get("to_id")
+        detail = tools.get_route_detail(route_id)
+        if not detail.get("ok"):
+            continue
+        route = detail["route"]
+        if route_id in operators:
+            operator = operators[route_id]
+        else:
+            operator = route.get("operator")
+        group = operator or UNKNOWN_OPERATOR
+        from_name = names.get(
+            from_id, _stop_name(from_id) if from_id is not None else None
+        ) or ""
+        to_name = names.get(
+            to_id, _stop_name(to_id) if to_id is not None else None
+        ) or ""
+        stops = route.get("stops") or []
+        option = {
+            "route": {
+                "id": route["id"],
+                "name": route["name"],
+                "evidence": f"/routes/{route['id']}",
+            },
+            "boarding_stop": {"id": from_id, "name": from_name},
+            "alighting_stop": {"id": to_id, "name": to_name},
+            "stop_count": len(stops),
+        }
+        origin = route.get("origin") or ""
+        if from_name:
+            hint = f"Board at {from_name}"
+            if origin and origin != from_name:
+                hint = f"{hint} ({origin})"
+            option["boarding_hint"] = hint
+        if group not in grouped:
+            grouped[group] = []
+            order.append(group)
+        grouped[group].append(option)
+        by_id[route_id] = (route, from_id, to_id, from_name, to_name)
+    groups = []
+    for group in sorted(order, key=lambda g: (g == UNKNOWN_OPERATOR, g)):
+        options = sorted(
+            grouped[group],
+            key=lambda o: (o["stop_count"], o["route"]["id"]),
+        )
+        groups.append({"operator": group, "options": options})
+    return groups, by_id
+
+
+def rank_pairs(pairs, operators=None, names=None, destinations=None):
+    """Rank verified pairs into operator groups with answer prose.
+
+    ``destinations`` is a precomputed reachable-member list of
+    ``{"stop", "evidence"}`` entries; only the first five are returned,
+    with overflow counted in the prose. Pure function (no model).
+    """
+    groups, _by_id = _rank_pairs(pairs, operators, names)
+    shown = list(destinations or [])[:5]
+    extra = len(destinations or []) - len(shown)
+    if len(groups) == 1 and len(groups[0]["options"]) == 1 and extra <= 0:
+        option = groups[0]["options"][0] if groups else None
+        if option is None:
+            answer = ""
+        else:
+            answer = (
+                f"Take the {option['route']['name'] or 'direct'} service "
+                f"from {option['boarding_stop']['name']} "
+                f"to {option['alighting_stop']['name']}."
+            )
+    else:
+        sentences = []
+        for group in groups:
+            for option in group["options"]:
+                sentences.append(
+                    f"{group['operator']}: Take the "
+                    f"{option['route']['name'] or 'direct'} service "
+                    f"from {option['boarding_stop']['name']} "
+                    f"to {option['alighting_stop']['name']}, "
+                    f"see {option['route']['evidence']}."
+                )
+        answer = " ".join(sentences)
+    if extra > 0:
+        answer = (
+            f"{answer} Plus {extra} more drop-off options "
+            "at this place.".strip()
+        )
+    return {
+        "groups": groups,
+        "destinations": shown,
+        "answer": answer,
+    }
+
+
 def _disambiguation_context(question, searches):
     """Enriched prompt metadata from tool searches; None when undeterminable.
 
@@ -576,6 +689,20 @@ def run_journey(*, question, history=(), context=None):
         )
         return payload, tracker["tools_used"]
 
+    def ranked_payload(ranked, first_route, from_id, to_id, draft):
+        payload, _ = _answer_payload(first_route, from_id, to_id, "", None)
+        single = (
+            len(ranked["groups"]) == 1
+            and len(ranked["groups"][0]["options"]) == 1
+        )
+        if draft and single and not _forbidden(draft):
+            payload["answer"] = draft
+        else:
+            payload["answer"] = ranked["answer"]
+        payload["option_groups"] = ranked["groups"]
+        payload["destinations"] = ranked["destinations"]
+        return payload
+
     def answer_direct(from_id, to_id):
         """Local verified answer (or honest refusal) without any model call."""
         result = tools.find_routes(from_stop_id=from_id, to_stop_id=to_id)
@@ -587,6 +714,7 @@ def run_journey(*, question, history=(), context=None):
                 result,
             )
         )
+        verified = []
         if result.get("ok"):
             pair = (from_id, to_id)
             for row in result.get("routes", []):
@@ -594,12 +722,27 @@ def run_journey(*, question, history=(), context=None):
             for row in result.get("routes", []):
                 route = _verify_route(row["id"], from_id, to_id)
                 if route is not None:
-                    payload, _ = _answer_payload(
-                        route, from_id, to_id, "", None
-                    )
-                    return selection_finish(payload)
+                    verified.append((route, from_id, to_id))
+        if not verified:
+            return selection_finish(
+                {"status": "refuse", "message": _NO_DIRECT}
+            )
+        pairs = [
+            {"route_id": route["id"], "from_id": f, "to_id": t}
+            for route, f, t in verified
+        ]
+        first_route = verified[0][0]
+        ranked = rank_pairs(
+            pairs,
+            destinations=[
+                {
+                    "stop": {"id": to_id, "name": _stop_name(to_id) or ""},
+                    "evidence": f"/routes/{first_route['id']}",
+                }
+            ],
+        )
         return selection_finish(
-            {"status": "refuse", "message": _NO_DIRECT}
+            ranked_payload(ranked, first_route, from_id, to_id, "")
         )
 
     selection = _resolve_selection(context, question)
@@ -738,6 +881,8 @@ def run_journey(*, question, history=(), context=None):
                 cited.append(rid)
 
         def verified_answer(text):
+            if _forbidden(text):
+                return None
             verified = []
             for rid in cited:
                 pair = tracker["findings"].get(rid)
@@ -746,12 +891,29 @@ def run_journey(*, question, history=(), context=None):
                 route = _verify_route(rid, pair[0], pair[1])
                 if route is None:
                     return None
-                verified.append((route, pair))
-            if not verified or _forbidden(text):
+                verified.append((route, pair[0], pair[1]))
+            if not verified:
                 return None
-            route, (from_id, to_id) = verified[0]
-            payload, _ = _answer_payload(route, from_id, to_id, text, None)
-            return payload
+            pairs = [
+                {"route_id": route["id"], "from_id": f, "to_id": t}
+                for route, f, t in verified
+            ]
+            first_route, first_from, first_to = verified[0]
+            ranked = rank_pairs(
+                pairs,
+                destinations=[
+                    {
+                        "stop": {
+                            "id": first_to,
+                            "name": _stop_name(first_to) or "",
+                        },
+                        "evidence": f"/routes/{first_route['id']}",
+                    }
+                ],
+            )
+            return ranked_payload(
+                ranked, first_route, first_from, first_to, text
+            )
 
         answer = verified_answer(draft) if cited else None
         if answer is None and cited:
