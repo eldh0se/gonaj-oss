@@ -618,3 +618,358 @@ class DisambiguationTests(ApiTestCase):
             "spelling" in body["message"].lower()
             or "map" in body["message"].lower()
         )
+
+
+class SelectionTests(ApiTestCase):
+    """008 selection fast-path: valid picks advance locally, invalid refuse safely."""
+
+    @classmethod
+    def setUpTestData(cls):
+        _, cls.import_run = f.make_snapshot(label="factory-selection")
+        cls.master = f.make_master(
+            cls.import_run, 61, "SelectLoop", operator="KSRTC",
+            network="Kochi",
+        )
+        cls.aluva = f.make_stop(
+            cls.import_run, 611, "Aluva", 10.11, 76.35
+        )
+        cls.keast = f.make_stop(
+            cls.import_run, 612, "Kaloor East", 9.99, 76.29
+        )
+        cls.kwest = f.make_stop(
+            cls.import_run, 613, "Kaloor West", 9.99, 76.28
+        )
+        cls.route = f.make_route(
+            cls.import_run, 611, "Aluva-East", from_text="",
+            to_text="",
+        )
+        f.link_master(cls.import_run, cls.master, cls.route, 1)
+        f.link_stop(cls.import_run, cls.route, cls.aluva, 1)
+        f.link_stop(cls.import_run, cls.route, cls.keast, 2)
+        # Both-ends fixture: same-named duplicates on each end.
+        cls.a1 = f.make_stop(cls.import_run, 621, "Aluva North", 10.11, 76.35)
+        cls.a2 = f.make_stop(cls.import_run, 622, "Aluva North", 10.12, 76.36)
+        cls.k1 = f.make_stop(cls.import_run, 623, "Kaloor", 9.99, 76.29)
+        cls.k2 = f.make_stop(cls.import_run, 624, "Kaloor", 9.98, 76.30)
+        cls.route2 = f.make_route(
+            cls.import_run, 612, "A1-K1", from_text="", to_text="",
+        )
+        f.link_master(cls.import_run, cls.master, cls.route2, 2)
+        f.link_stop(cls.import_run, cls.route2, cls.a1, 1)
+        f.link_stop(cls.import_run, cls.route2, cls.k1, 2)
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self._real = provider.complete_with_tools
+
+    def tearDown(self):
+        provider.complete_with_tools = self._real
+
+    def ask(self, body):
+        return self.client.post("/api/v1/journey/", body, format="json")
+
+    def base_context(self, **overrides):
+        context = {
+            "candidate_stop_ids": [self.keast.id, self.kwest.id],
+            "selected_stop_id": self.keast.id,
+            "slot": "to",
+            "resolved": {"id": self.aluva.id, "name": "Aluva"},
+        }
+        context.update(overrides)
+        return context
+
+    def test_click_pick_returns_verified_answer_without_model_call(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        body = self.ask(
+            {
+                "question": "Kaloor East",
+                "history": [
+                    {
+                        "role": "user",
+                        "content": "How do I get from Aluva to Kaloor?",
+                    }
+                ],
+                "context": self.base_context(),
+            }
+        ).json()
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["boarding_stop"]["name"], "Aluva")
+        self.assertEqual(body["alighting_stop"]["name"], "Kaloor East")
+        self.assertEqual(
+            body["routes"][0]["evidence"], f"/routes/{self.route.id}"
+        )
+        self.assertEqual(body["meta"]["model"], "none")
+        self.assertEqual(body["meta"]["provider"], "local-fallback")
+        self.assertEqual(body["meta"]["resolution"], "selection")
+        self.assertEqual(stub.calls, 0)
+
+    def test_typed_name_pick_derives_same_stop(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        context = self.base_context()
+        del context["selected_stop_id"]
+        body = self.ask(
+            {
+                "question": "Kaloor East",
+                "history": [
+                    {
+                        "role": "user",
+                        "content": "How do I get from Aluva to Kaloor?",
+                    }
+                ],
+                "context": context,
+            }
+        ).json()
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["alighting_stop"]["name"], "Kaloor East")
+        self.assertEqual(body["meta"]["resolution"], "selection")
+        self.assertEqual(stub.calls, 0)
+
+    def test_typed_position_pick_derives_same_stop(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        context = self.base_context()
+        del context["selected_stop_id"]
+        body = self.ask(
+            {
+                "question": "1",
+                "history": [
+                    {
+                        "role": "user",
+                        "content": "How do I get from Aluva to Kaloor?",
+                    }
+                ],
+                "context": context,
+            }
+        ).json()
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["alighting_stop"]["name"], "Kaloor East")
+        self.assertEqual(stub.calls, 0)
+
+    def test_valid_pick_without_direct_route_refuses_plainly(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        body = self.ask(
+            {
+                "question": "Kaloor West",
+                "history": [
+                    {
+                        "role": "user",
+                        "content": "How do I get from Aluva to Kaloor?",
+                    }
+                ],
+                "context": self.base_context(
+                    selected_stop_id=self.kwest.id,
+                ),
+            }
+        ).json()
+        self.assertEqual(body["status"], "refuse")
+        self.assertIn("direct", body["message"].lower())
+        self.assertNotIn("routes", body)
+        self.assertEqual(body["meta"]["resolution"], "selection")
+        self.assertEqual(stub.calls, 0)
+
+    def test_both_ends_first_pick_prompts_remaining_end_only(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        body = self.ask(
+            {
+                "question": "Aluva",
+                "history": [
+                    {
+                        "role": "user",
+                        "content": "How do I get from Aluva to Kaloor?",
+                    }
+                ],
+                "context": {
+                    "candidate_stop_ids": [self.a1.id, self.a2.id],
+                    "selected_stop_id": self.a1.id,
+                    "slot": "from",
+                    "slots": {
+                        "from_ids": [self.a1.id, self.a2.id],
+                        "to_ids": [self.k1.id, self.k2.id],
+                    },
+                },
+            }
+        ).json()
+        self.assertEqual(body["status"], "disambiguate")
+        self.assertEqual(body["slot"], "to")
+        self.assertEqual(body["offered_ids"], [self.k1.id, self.k2.id])
+        self.assertEqual(
+            {c["id"] for c in body["candidates"]}, {self.k1.id, self.k2.id}
+        )
+        self.assertEqual(body["resolved"]["id"], self.a1.id)
+        self.assertEqual(stub.calls, 0)
+
+    def test_both_ends_second_pick_answers(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        body = self.ask(
+            {
+                "question": "Kaloor",
+                "history": [
+                    {
+                        "role": "user",
+                        "content": "How do I get from Aluva to Kaloor?",
+                    }
+                ],
+                "context": {
+                    "candidate_stop_ids": [self.k1.id, self.k2.id],
+                    "selected_stop_id": self.k1.id,
+                    "slot": "to",
+                    "resolved": {"id": self.a1.id, "name": "Aluva"},
+                },
+            }
+        ).json()
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["boarding_stop"]["id"], self.a1.id)
+        self.assertEqual(body["alighting_stop"]["id"], self.k1.id)
+        self.assertEqual(
+            body["routes"][0]["evidence"], f"/routes/{self.route2.id}"
+        )
+        self.assertEqual(stub.calls, 0)
+
+    def test_forged_pick_refuses_safely(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        body = self.ask(
+            {
+                "question": "Kaloor East",
+                "history": [],
+                "context": self.base_context(selected_stop_id=99999),
+            }
+        ).json()
+        self.assertEqual(body["status"], "refuse")
+        self.assertIn("match", body["message"].lower())
+        self.assertNotIn("routes", body)
+        self.assertEqual(stub.calls, 0)
+
+    def test_malformed_resolved_refuses_safely(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        body = self.ask(
+            {
+                "question": "Kaloor East",
+                "history": [],
+                "context": self.base_context(resolved={"name": "Aluva"}),
+            }
+        ).json()
+        self.assertEqual(body["status"], "refuse")
+        self.assertIn("match", body["message"].lower())
+        self.assertEqual(stub.calls, 0)
+
+    def test_ambiguous_text_pick_refuses_safely(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        context = self.base_context()
+        del context["selected_stop_id"]
+        context["candidate_stop_ids"] = [self.keast.id, self.kwest.id]
+        body = self.ask(
+            {
+                "question": "Kaloor",
+                "history": [],
+                "context": context,
+            }
+        ).json()
+        self.assertEqual(body["status"], "refuse")
+        self.assertIn("match", body["message"].lower())
+        self.assertEqual(stub.calls, 0)
+
+    def test_bad_slot_refuses_safely(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        body = self.ask(
+            {
+                "question": "Kaloor East",
+                "history": [],
+                "context": self.base_context(slot="middle"),
+            }
+        ).json()
+        self.assertEqual(body["status"], "refuse")
+        self.assertIn("match", body["message"].lower())
+        self.assertEqual(stub.calls, 0)
+
+    def test_fresh_question_drops_stale_candidates(self):
+        stub = StubModel(
+            script=[
+                _Response(
+                    _Message(
+                        tool_calls=[
+                            _ToolCall(
+                                "c1",
+                                "find_routes",
+                                json.dumps(
+                                    {
+                                        "from_stop_id": self.aluva.id,
+                                        "to_stop_id": self.keast.id,
+                                    }
+                                ),
+                            )
+                        ]
+                    )
+                ),
+                _Response(
+                    _Message(
+                        content="Take the Aluva-East service from "
+                        "Aluva to Kaloor East, see "
+                        f"/routes/{self.route.id}."
+                    )
+                ),
+            ]
+        )
+        provider.complete_with_tools = stub
+        body = self.ask(
+            {
+                "question": "How do I get from Aluva to Kaloor East?",
+                "history": [],
+                "context": {
+                    "candidate_stop_ids": [self.kwest.id],
+                    "slot": "to",
+                },
+            }
+        ).json()
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["boarding_stop"]["name"], "Aluva")
+        sent = stub.received[0]
+        hints = [m["content"] for m in sent if m.get("role") == "system"]
+        self.assertFalse(any(str(self.kwest.id) in h for h in hints))
+
+    def test_model_loop_disambiguation_carries_slot_and_offered_ids(self):
+        stub = StubModel(
+            script=[
+                _Response(
+                    _Message(
+                        tool_calls=[
+                            _ToolCall(
+                                "c1",
+                                "search_stops",
+                                json.dumps({"query": "Aluva North"}),
+                            )
+                        ]
+                    )
+                ),
+                _Response(
+                    _Message(
+                        tool_calls=[
+                            _ToolCall(
+                                "c2",
+                                "search_stops",
+                                json.dumps({"query": "Kaloor East"}),
+                            )
+                        ]
+                    )
+                ),
+                _Response(_Message(content="Which stop did you mean?")),
+            ]
+        )
+        provider.complete_with_tools = stub
+        body = self.ask(
+            {"question": "How do I get from Aluva North to Kaloor East?"}
+        ).json()
+        self.assertEqual(body["status"], "disambiguate")
+        self.assertEqual(body["slot"], "from")
+        self.assertEqual(body["offered_ids"], [self.a1.id, self.a2.id])
+        self.assertEqual(body["resolved"]["id"], self.keast.id)
+        self.assertTrue(all("detail" in c for c in body["candidates"]))
