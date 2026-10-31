@@ -4,10 +4,12 @@
 // receives data as props. No model calls and no model key here —
 // all AI traffic is the two versioned REST endpoints.
 import { ApiError } from "./client.js";
+import { debugLog } from "./debug.js";
 
 const API_BASE = "/api/v1";
 
 async function requestJson(path, body, { signal } = {}) {
+  const started = Date.now();
   let response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
@@ -18,6 +20,7 @@ async function requestJson(path, body, { signal } = {}) {
     });
   } catch (err) {
     if (err?.name === "AbortError") throw err;
+    debugLog("api", { path, outcome: "network-error" });
     throw new ApiError(
       0,
       "We could not reach the journey helper. Please check your connection and try again."
@@ -30,12 +33,22 @@ async function requestJson(path, body, { signal } = {}) {
     data = null;
   }
   if (!response.ok) {
+    debugLog("api", {
+      path,
+      outcome: `http-${response.status}`,
+      duration_ms: Date.now() - started,
+    });
     const detail =
       data && typeof data.detail === "string"
         ? data.detail
         : "The journey helper cannot answer right now. Please try again later.";
     throw new ApiError(response.status, detail);
   }
+  debugLog("api", {
+    path,
+    outcome: `http-${response.status}`,
+    duration_ms: Date.now() - started,
+  });
   return data;
 }
 
@@ -48,6 +61,7 @@ export function postJourney({ question, history, context } = {}, opts) {
 }
 
 export async function postTranscribe(audioBlob, { signal } = {}) {
+  const started = Date.now();
   const form = new FormData();
   form.append("audio", audioBlob, "question.webm");
   let response;
@@ -59,6 +73,10 @@ export async function postTranscribe(audioBlob, { signal } = {}) {
     });
   } catch (err) {
     if (err?.name === "AbortError") throw err;
+    debugLog("api", {
+      path: "/journey/transcribe/",
+      outcome: "network-error",
+    });
     throw new ApiError(
       0,
       "We could not reach the transcription service. Please check your connection and try again."
@@ -71,11 +89,21 @@ export async function postTranscribe(audioBlob, { signal } = {}) {
     data = null;
   }
   if (!response.ok) {
+    debugLog("api", {
+      path: "/journey/transcribe/",
+      outcome: `http-${response.status}`,
+      duration_ms: Date.now() - started,
+    });
     const detail =
       data && typeof data.detail === "string"
         ? data.detail
         : "We could not transcribe that. Please try again.";
     throw new ApiError(response.status, detail);
   }
+  debugLog("api", {
+    path: "/journey/transcribe/",
+    outcome: `http-${response.status}`,
+    duration_ms: Date.now() - started,
+  });
   return data;
 }
