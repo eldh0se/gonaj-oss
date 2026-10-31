@@ -100,9 +100,13 @@ describe("JourneyPanel", () => {
       status: "disambiguate",
       message: "I found more than one stop called North. Which one did you mean?",
       candidates: [
-        { id: 201, name: "North Hub" },
+        { id: 201, name: "North Hub", detail: "10.0500,76.3000" },
         { id: 312, name: "North Edge" },
       ],
+      slot: "from",
+      resolved: { id: 11, name: "Ernakulam South" },
+      offered_ids: [201, 312],
+      slots: { from_ids: [201, 312], to_ids: [11] },
       meta: { model: "muse-spark-1.3", provider: "meta", latency_ms: 480 },
     };
     const bodies = [];
@@ -128,11 +132,80 @@ describe("JourneyPanel", () => {
       target: { value: "How do I get from North?" },
     });
     fireEvent.click(screen.getByRole("button", { name: /ask/i }));
-    fireEvent.click(await screen.findByRole("button", { name: "North Hub" }));
+    fireEvent.click(await screen.findByRole("button", { name: /North Hub/ }));
     expect(await screen.findByText(/North service/)).toBeTruthy();
     expect(bodies).toHaveLength(2);
     expect(bodies[1].context.candidate_stop_ids).toEqual([201, 312]);
+    expect(bodies[1].context.selected_stop_id).toBe(201);
+    expect(bodies[1].context.slot).toBe("from");
+    expect(bodies[1].context.resolved).toEqual({
+      id: 11,
+      name: "Ernakulam South",
+    });
+    expect(bodies[1].context.slots).toEqual({
+      from_ids: [201, 312],
+      to_ids: [11],
+    });
+    expect(bodies[1].history).toEqual([
+      { role: "user", content: "How do I get from North?" },
+    ]);
     expect(bodies[1].question).toBe("North Hub");
+    vi.unstubAllGlobals();
+  });
+
+  it("completes a two-step both-ends flow with surviving context", async () => {
+    const first = {
+      status: "disambiguate",
+      message: "Thanks — keeping Aluva. Which one did you mean for the destination?",
+      candidates: [
+        { id: 623, name: "Kaloor", detail: "9.9900,76.2900" },
+        { id: 624, name: "Kaloor", detail: "9.9800,76.3000" },
+      ],
+      slot: "to",
+      resolved: { id: 621, name: "Aluva" },
+      offered_ids: [623, 624],
+      slots: { from_ids: [621, 622], to_ids: [623, 624] },
+      meta: { model: "none", provider: "local-fallback", latency_ms: 40 },
+    };
+    const bodies = [];
+    const fetch = vi.fn(async (url, options) => {
+      const body = JSON.parse(options.body);
+      bodies.push(body);
+      const payload =
+        bodies.length === 1
+          ? first
+          : {
+              status: "ok",
+              answer: "Take the A1-K1 service from Aluva to Kaloor.",
+              boarding_stop: { id: 621, name: "Aluva" },
+              alighting_stop: { id: 623, name: "Kaloor" },
+              routes: [{ id: 5, name: "A1-K1", evidence: "/routes/5" }],
+              meta: {
+                model: "none",
+                provider: "local-fallback",
+                resolution: "selection",
+                latency_ms: 42,
+              },
+            };
+      return { ok: true, json: async () => payload };
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<JourneyPanel />);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "How do I get from Aluva to Kaloor?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    const options = await screen.findAllByRole("button", { name: /Kaloor/ });
+    expect(options).toHaveLength(2);
+    fireEvent.click(options[0]);
+    expect(await screen.findByText(/A1-K1 service/)).toBeTruthy();
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].context.selected_stop_id).toBe(623);
+    expect(bodies[1].context.slot).toBe("to");
+    expect(bodies[1].context.resolved).toEqual({ id: 621, name: "Aluva" });
+    expect(bodies[1].history).toEqual([
+      { role: "user", content: "How do I get from Aluva to Kaloor?" },
+    ]);
     vi.unstubAllGlobals();
   });
 

@@ -64,9 +64,12 @@ the plain-language `400`.
   "status": "disambiguate",
   "message": "I found more than one stop called North. Which one did you mean?",
   "candidates": [
-    { "id": 201, "name": "North Hub" },
+    { "id": 201, "name": "North Hub", "detail": "നോർത്ത് ഹബ്" },
     { "id": 312, "name": "North Edge" }
   ],
+  "slot": "from",
+  "resolved": { "id": 11, "name": "Ernakulam South" },
+  "offered_ids": [201, 312],
   "meta": { "model": "muse-spark-1.3", "provider": "meta", "latency_ms": 480 }
 }
 ```
@@ -75,6 +78,25 @@ No journey answer is given yet. The passenger replies with a
 choice (as `question` naming the candidate, or `context` with
 `candidate_stop_ids`); the follow-up answers for the chosen
 stop or refuses honestly.
+
+Additive selection fields (008): `slot` (`from` or `to`) names
+the end being asked; `resolved` carries the already-fixed other
+end; `offered_ids` repeats the candidate IDs for this slot;
+per-candidate `detail` (`name_ml` when present, else rounded
+`lat,lon`) distinguishes same-named stops and may be absent.
+When both ends are ambiguous the response additionally carries
+`slots: {from_ids, to_ids}` and
+`surviving_context: {other_end_ids}` instead of re-prompting a
+resolved end. A selection follow-up sends `question` (display
+text), preserved `history` (original question), and
+`context: {candidate_stop_ids, selected_stop_id, slot,
+resolved}`; the server also accepts typed picks (exact name or
+1-based position matching exactly one candidate) by deriving
+`selected_stop_id` itself. Selection answers carry
+`meta.resolution: "selection"` alongside
+`model: "none", provider: "local-fallback"`; the model-outage
+fallback keeps the same `model`/`provider` with no `resolution`
+key.
 
 ## Refusal response — `200`
 

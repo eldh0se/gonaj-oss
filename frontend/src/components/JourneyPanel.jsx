@@ -191,7 +191,7 @@ export default function JourneyPanel() {
     }
   }
 
-  async function ask(text, context) {
+  async function ask(text, context, history) {
     const wording = (text ?? question).trim();
     if (!wording) {
       setDirect({ status: "idle" });
@@ -213,7 +213,7 @@ export default function JourneyPanel() {
       const body = await postJourney(
         {
           question: wording,
-          history: [],
+          history: history ?? [],
           context: context ?? {},
         },
         { signal: controller.signal }
@@ -238,11 +238,24 @@ export default function JourneyPanel() {
     }
   }
 
-  function choose(candidate, candidates) {
+  function choose(candidate, payload) {
+    const candidates = payload.candidates ?? [];
+    // The input still holds the passenger's original question here:
+    // capture it so the follow-up preserves history for the second end.
+    const original = question;
     setQuestion(candidate.name);
-    ask(candidate.name, {
-      candidate_stop_ids: candidates.map((c) => c.id),
-    });
+    ask(
+      candidate.name,
+      {
+        candidate_stop_ids: candidates.map((c) => c.id),
+        selected_stop_id: candidate.id,
+        slot: payload.slot,
+        resolved: payload.resolved,
+        slots: payload.slots,
+        surviving_context: payload.surviving_context,
+      },
+      original ? [{ role: "user", content: original }] : []
+    );
   }
 
   return (
@@ -371,9 +384,10 @@ export default function JourneyPanel() {
                 <li key={candidate.id}>
                   <button
                     type="button"
-                    onClick={() => choose(candidate, state.payload.candidates)}
+                    onClick={() => choose(candidate, state.payload)}
                   >
                     {candidate.name}
+                    {candidate.detail ? ` — ${candidate.detail}` : ""}
                   </button>
                 </li>
               ))}

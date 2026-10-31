@@ -81,6 +81,297 @@ _UNVERIFIABLE = (
 )
 
 
+_UNMATCHED_PICK = (
+    "I could not match that choice to the stops I listed. "
+    "Please choose one of the listed stops, or rephrase your "
+    "journey question with the two stop names."
+)
+
+_ORDINAL_WORDS = {
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+}
+
+_FRESH_QUESTION = re.compile(
+    r"\b(how|what|where|which|from|to|route|routes|bus|buses|"
+    r"get|going|reach|take|find|there)\b|\?",
+    re.IGNORECASE,
+)
+
+_FROM_TO = re.compile(r"from\s+(.+?)\s+to\s+(.+?)(?:[?.!]|$)", re.IGNORECASE)
+
+
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _candidate_detail_from_row(row):
+    if row.get("name_ml"):
+        return row["name_ml"]
+    try:
+        return f"{float(row.get('lat')):.4f},{float(row.get('lon')):.4f}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _candidate_detail(stop):
+    if getattr(stop, "name_ml", None):
+        return stop.name_ml
+    try:
+        return f"{stop.lat:.4f},{stop.lon:.4f}"
+    except (TypeError, ValueError, AttributeError):
+        return ""
+
+
+def _candidate_entry(stop_id, name, detail):
+    entry = {"id": stop_id, "name": name}
+    if detail:
+        entry["detail"] = detail
+    return entry
+
+
+def _match_selection_text(question, stops_by_id):
+    """Map typed text to one offered candidate.
+
+    Returns ("id", stop_id) for an unambiguous pick (case-insensitive
+    exact name/name_ml match, or a 1-based position/ordinal matching
+    exactly one slot entry), ("multi",) when the text matches several
+    candidates, or ("zero",) when it matches none.
+    """
+    text = (question or "").strip().lower().rstrip("?.!. ")
+    ids = list(stops_by_id)
+    if not text:
+        return ("zero",)
+    if text.isdigit():
+        index = int(text) - 1
+        if 0 <= index < len(ids):
+            return ("id", ids[index])
+        return ("zero",)
+    if text in _ORDINAL_WORDS:
+        index = _ORDINAL_WORDS[text] - 1
+        if 0 <= index < len(ids):
+            return ("id", ids[index])
+        return ("zero",)
+    matches = [
+        sid
+        for sid, stop in stops_by_id.items()
+        if (stop.name or "").lower() == text
+        or (getattr(stop, "name_ml", None) or "").lower() == text
+    ]
+    if len(matches) == 1:
+        return ("id", matches[0])
+    return ("multi",) if matches else ("zero",)
+
+
+def _resolve_selection(context, question):
+    """Classify a follow-up carrying selection state (no model needed).
+
+    Returns one of:
+    ("none",) — no selection keys; run the legacy model loop.
+    ("invalid",) — selection keys present but unusable; refuse safely.
+    ("fresh",) — a new journey question; drop stale context, run legacy loop.
+    ("full", from_id, to_id) — both ends known; answer directly.
+    ("partial", known_slot, known_id, remaining_slot, remaining_ids, slots)
+      — one end picked; prompt the remaining end. remaining_ids may be []
+      when undiscoverable (the caller derives them from the question).
+    """
+    if not isinstance(context, dict):
+        return ("none",)
+    cands = [
+        c for c in (context.get("candidate_stop_ids") or []) if _is_int(c)
+    ]
+    selected = context.get("selected_stop_id")
+    slot = context.get("slot")
+    resolved = context.get("resolved")
+    slots = context.get("slots")
+    has_keys = (
+        bool(cands)
+        or selected is not None
+        or slot is not None
+        or isinstance(resolved, dict)
+        or isinstance(slots, dict)
+    )
+    if not has_keys:
+        return ("none",)
+    if not cands:
+        return ("invalid",)
+    by_id = Stop.objects.filter(pk__in=cands).in_bulk()
+    ordered = {cid: by_id[cid] for cid in cands if cid in by_id}
+    if selected is not None:
+        if selected not in ordered:
+            return ("invalid",)
+    elif slot not in ("from", "to"):
+        # Legacy shape ({candidate_stop_ids} only, no slot): the model
+        # loop stays compatible when the reply names exactly one offered
+        # candidate; otherwise the reply matches nothing and refuses safely.
+        if _match_selection_text(question, ordered)[0] != "id":
+            return ("invalid",)
+        return ("none",)
+    else:
+        outcome = _match_selection_text(question, ordered)
+        if outcome[0] != "id":
+            if _FRESH_QUESTION.search(question or ""):
+                return ("fresh",)
+            return ("invalid",)
+        selected = outcome[1]
+    if slot not in ("from", "to"):
+        return ("invalid",)
+    if isinstance(resolved, dict):
+        resolved_id = resolved.get("id")
+        if not _is_int(resolved_id):
+            return ("invalid",)
+        if slot == "from":
+            return ("full", selected, resolved_id)
+        return ("full", resolved_id, selected)
+    remaining = "to" if slot == "from" else "from"
+    remaining_ids = []
+    if isinstance(slots, dict):
+        remaining_ids = [
+            c for c in (slots.get(remaining + "_ids") or []) if _is_int(c)
+        ]
+    return ("partial", slot, selected, remaining, remaining_ids, slots)
+
+
+def _remaining_from_question(question, known_slot, known_id, tracker):
+    """Derive the other end from a from/to question without the model.
+
+    Returns ("answer", from_id, to_id) for a singleton match,
+    ("prompt", ids) for several matches, ("unknown",) when nothing
+    matches, or (None,) when the question carries no usable other end.
+    """
+    match = _FROM_TO.search(question or "")
+    if not match:
+        return (None,)
+    if known_slot == "from":
+        other_text = match.group(2).strip()
+    else:
+        other_text = match.group(1).strip()
+    if not other_text:
+        return (None,)
+    result = tools.search_stops(query=other_text)
+    tracker["tools_used"].append("search_stops")
+    tracker["calls"].append(
+        ("search_stops", {"query": other_text}, result)
+    )
+    if not result.get("ok"):
+        return (None,)
+    stops = result.get("stops") or []
+    if not stops:
+        return ("unknown",)
+    if len(stops) == 1:
+        other_id = stops[0]["id"]
+        if known_slot == "from":
+            return ("answer", known_id, other_id)
+        return ("answer", other_id, known_id)
+    return ("prompt", [stop["id"] for stop in stops])
+
+
+def _selection_meta(latency_ms):
+    """Local-selection meta: outage fallback shape plus a resolution key."""
+    meta = _meta(latency_ms, fallback=True)
+    meta["resolution"] = "selection"
+    return meta
+
+
+def _disambiguation_context(question, searches):
+    """Enriched prompt metadata from tool searches; None when undeterminable.
+
+    Assigns each search to a journey end via the from/to question shape:
+    one ambiguous end plus a resolved other end returns a single-end
+    payload with slot/resolved/offered_ids/detail; two ambiguous ends
+    return slots/surviving_context with the origin side prompted first.
+    """
+    groups = []
+    for args, result in searches:
+        if not isinstance(args, dict) or not result.get("ok"):
+            continue
+        stops = result.get("stops") or []
+        if stops:
+            groups.append(((args.get("query") or ""), stops))
+    if not groups:
+        return None
+    match = _FROM_TO.search(question or "")
+    if not match:
+        return None
+    parts = {"from": match.group(1).lower(), "to": match.group(2).lower()}
+    ambiguous = {}
+    resolved = {}
+    for query, stops in groups:
+        query_text = query.lower()
+        end = None
+        for candidate in ("from", "to"):
+            if query_text and query_text in parts[candidate]:
+                end = candidate
+                break
+        if end is None:
+            return None
+        if len(stops) == 1:
+            resolved.setdefault(end, stops[0])
+        else:
+            ambiguous.setdefault(end, stops)
+    if not ambiguous:
+        return None
+    if len(ambiguous) == 1:
+        slot = next(iter(ambiguous))
+        stops = ambiguous[slot]
+        payload = {
+            "status": "disambiguate",
+            "message": "I found more than one stop with that "
+            "name. Which one did you mean?",
+            "candidates": [
+                _candidate_entry(
+                    stop["id"],
+                    stop["name"],
+                    _candidate_detail_from_row(stop),
+                )
+                for stop in stops
+            ],
+            "slot": slot,
+            "offered_ids": [stop["id"] for stop in stops],
+        }
+        other = "to" if slot == "from" else "from"
+        if other in resolved:
+            payload["resolved"] = {
+                "id": resolved[other]["id"],
+                "name": resolved[other]["name"],
+            }
+        return payload
+    first, second = "from", "to"
+    if first not in ambiguous:
+        first, second = second, first
+    stops = ambiguous[first]
+    return {
+        "status": "disambiguate",
+        "message": "I found more than one stop at each end. "
+        "First, which origin did you mean?",
+        "candidates": [
+            _candidate_entry(
+                stop["id"], stop["name"], _candidate_detail_from_row(stop)
+            )
+            for stop in stops
+        ],
+        "slot": first,
+        "offered_ids": [stop["id"] for stop in stops],
+        "slots": {
+            "from_ids": [stop["id"] for stop in ambiguous.get("from", [])],
+            "to_ids": [stop["id"] for stop in ambiguous.get("to", [])],
+        },
+        "surviving_context": {
+            "other_end": second,
+            "other_end_ids": [
+                stop["id"] for stop in ambiguous.get(second, [])
+            ],
+        },
+    }
+
+
 def _meta(latency_ms, fallback=False):
     if fallback:
         return {
@@ -275,6 +566,114 @@ def run_journey(*, question, history=(), context=None):
         return {"status": "refuse", "message": _ASK_AGAIN, "meta": meta}, []
 
     tracker = {"tools_used": [], "calls": [], "findings": {}, "searches": []}
+
+    def selection_finish(payload):
+        latency_ms = int((time.monotonic() - started) * 1000)
+        meta = _selection_meta(latency_ms)
+        payload["meta"] = meta
+        _log(
+            meta["model"], meta["provider"], latency_ms, tracker["tools_used"]
+        )
+        return payload, tracker["tools_used"]
+
+    def answer_direct(from_id, to_id):
+        """Local verified answer (or honest refusal) without any model call."""
+        result = tools.find_routes(from_stop_id=from_id, to_stop_id=to_id)
+        tracker["tools_used"].append("find_routes")
+        tracker["calls"].append(
+            (
+                "find_routes",
+                {"from_stop_id": from_id, "to_stop_id": to_id},
+                result,
+            )
+        )
+        if result.get("ok"):
+            pair = (from_id, to_id)
+            for row in result.get("routes", []):
+                tracker["findings"][row["id"]] = pair
+            for row in result.get("routes", []):
+                route = _verify_route(row["id"], from_id, to_id)
+                if route is not None:
+                    payload, _ = _answer_payload(
+                        route, from_id, to_id, "", None
+                    )
+                    return selection_finish(payload)
+        return selection_finish(
+            {"status": "refuse", "message": _NO_DIRECT}
+        )
+
+    selection = _resolve_selection(context, question)
+    if selection[0] == "invalid":
+        return selection_finish(
+            {"status": "refuse", "message": _UNMATCHED_PICK}
+        )
+    if selection[0] == "full":
+        _, from_id, to_id = selection
+        return answer_direct(from_id, to_id)
+    if selection[0] == "partial":
+        _, known_slot, known_id, remaining_slot, remaining_ids, slots = (
+            selection
+        )
+        if not remaining_ids:
+            derived = _remaining_from_question(
+                question, known_slot, known_id, tracker
+            )
+            if derived[0] == "answer":
+                return answer_direct(derived[1], derived[2])
+            if derived[0] == "prompt":
+                remaining_ids = derived[1]
+            elif derived[0] == "unknown":
+                return selection_finish(
+                    {"status": "refuse", "message": _UNKNOWN_PLACE}
+                )
+            else:
+                return selection_finish(
+                    {"status": "refuse", "message": _UNMATCHED_PICK}
+                )
+        known_name = _stop_name(known_id) or ""
+        stops = Stop.objects.filter(pk__in=remaining_ids).in_bulk()
+        candidates = [
+            _candidate_entry(
+                sid, (stops[sid].name or ""), _candidate_detail(stops[sid])
+            )
+            for sid in remaining_ids
+            if sid in stops
+        ]
+        if not candidates:
+            return selection_finish(
+                {"status": "refuse", "message": _UNKNOWN_PLACE}
+            )
+        payload = {
+            "status": "disambiguate",
+            "message": (
+                f"Thanks — keeping {known_name}. Which one did you mean "
+                "for the "
+                f"{'destination' if remaining_slot == 'to' else 'origin'}?"
+            ),
+            "candidates": candidates,
+            "slot": remaining_slot,
+            "resolved": {"id": known_id, "name": known_name},
+            "offered_ids": remaining_ids,
+        }
+        if isinstance(slots, dict):
+            payload["slots"] = {
+                "from_ids": [
+                    c for c in (slots.get("from_ids") or []) if _is_int(c)
+                ],
+                "to_ids": [
+                    c for c in (slots.get("to_ids") or []) if _is_int(c)
+                ],
+            }
+            payload["surviving_context"] = {
+                "other_end": known_slot,
+                "other_end_ids": [known_id],
+            }
+        return selection_finish(payload)
+    if selection[0] == "fresh":
+        context = {}
+    candidate_ids = [
+        c for c in (context.get("candidate_stop_ids") or []) if isinstance(c, int)
+    ]
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if candidate_ids:
         messages.append(
@@ -373,6 +772,9 @@ def run_journey(*, question, history=(), context=None):
         if answer is not None:
             return finish(answer)
 
+        enriched = _disambiguation_context(question, tracker["searches"])
+        if enriched is not None:
+            return finish(enriched)
         for _args, result in reversed(tracker["searches"]):
             stops = result.get("stops", [])
             if len(stops) > 1:
