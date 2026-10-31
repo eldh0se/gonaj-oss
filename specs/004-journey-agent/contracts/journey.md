@@ -57,6 +57,13 @@ the plain-language `400`.
   `local-fallback`), `meta.latency_ms` the measured producing
   latency.
 
+Ranked answers (010) add two fields, documented in full in
+`specs/010-ranked-options/contracts/answer.md`: `option_groups`
+(per-operator ranked options; unknown operator sorts last as
+`"Other services"`) and `destinations` (up to 5 reachable member
+stops, each evidence-linked). The prose `answer` enumerates the
+groups, so old renderers keep working.
+
 ## Disambiguation response — `200`
 
 ```json
