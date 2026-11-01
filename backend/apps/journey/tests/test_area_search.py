@@ -167,6 +167,61 @@ class AreaFlowTests(TestCase):
         self.assertIn("walk", payload["answer"])
 
 
+class TokenFallbackTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        _, run = f.make_snapshot(label="factory-token-fallback")
+        cls.south_railway = f.make_stop(run, 981, "South Railway", 9.97, 76.28)
+        cls.north_railway = f.make_stop(run, 982, "North Railway", 9.96, 76.27)
+        cls.aluva = f.make_stop(run, 983, "Aluva", 10.11, 76.35)
+
+    def test_token_fallback_finds_shorter_name(self):
+        out = tools.search_stops(query="South Railway Station")
+        self.assertTrue(out["ok"])
+        ids = [stop["id"] for stop in out["stops"]]
+        self.assertIn(self.south_railway.id, ids)
+        self.assertLess(
+            ids.index(self.south_railway.id),
+            ids.index(self.north_railway.id),
+        )
+
+    def test_token_fallback_groups(self):
+        out = tools.search_places(query="South Railway Station")
+        self.assertTrue(out["ok"])
+        member_ids = [
+            member["id"] for group in out["groups"] for member in group["members"]
+        ]
+        self.assertIn(self.south_railway.id, member_ids)
+
+    def test_exact_match_skips_fallback(self):
+        from unittest import mock
+
+        from apps.journey import tools as tools_module
+
+        with mock.patch.object(
+            tools_module,
+            "_token_overlap_rows",
+            side_effect=AssertionError("fallback used on exact hit"),
+        ):
+            stops_out = tools.search_stops(query="Aluva")
+            self.assertTrue(stops_out["ok"])
+            self.assertIn(
+                self.aluva.id, [stop["id"] for stop in stops_out["stops"]]
+            )
+            places_out = tools.search_places(query="Aluva")
+            self.assertTrue(places_out["ok"])
+            self.assertTrue(places_out["groups"])
+
+    def test_unknown_stays_empty(self):
+        stops_out = tools.search_stops(query="ZzxqNoSuchPlace")
+        self.assertTrue(stops_out["ok"])
+        self.assertEqual(stops_out["status"], "empty")
+        places_out = tools.search_places(query="ZzxqNoSuchPlace")
+        self.assertTrue(places_out["ok"])
+        self.assertEqual(places_out.get("status"), "empty")
+        self.assertEqual(places_out.get("groups"), [])
+
+
 class SingleEndedTests(TestCase):
     def test_single_ended_keeps_legacy_loop(self):
         # Out of scope for 012: no from-to shape, so the legacy model

@@ -12,6 +12,7 @@ plus the 006 endpoint-name annotations. Failures return
 place-grouping helpers for direct use (no model registration).
 """
 import math
+import re
 
 from django.db.models import Q
 
@@ -167,6 +168,46 @@ def _stop_row(stop):
     }
 
 
+_TOKEN_SPLIT = re.compile(r"[^0-9a-z]+")
+
+
+def _query_tokens(text):
+    """Lowercase alphanumeric tokens of a search string."""
+    return [
+        token
+        for token in _TOKEN_SPLIT.split(str(text or "").lower())
+        if token
+    ]
+
+
+def _token_overlap_rows(text):
+    """Stage-2 fallback: token-overlap rank over an icontains prefilter.
+
+    Runs only when Stage-1 icontains finds nothing. Prefilters stops
+    matching any query token (name or name_ml), ranks in Python by shared
+    token count desc then name, id, and caps at ``RESULT_LIMIT``.
+    SQLite-portable, no new dependencies.
+    """
+    wanted = set(_query_tokens(text))
+    if not wanted:
+        return []
+    token_filter = Q()
+    for token in wanted:
+        token_filter |= Q(name__icontains=token) | Q(
+            name_ml__icontains=token
+        )
+    scored = []
+    for stop in Stop.objects.filter(token_filter).order_by("name", "id"):
+        candidate = set(_query_tokens(stop.name)) | set(
+            _query_tokens(stop.name_ml)
+        )
+        shared = len(wanted & candidate)
+        if shared:
+            scored.append((shared, stop.name or "", stop.id, stop))
+    scored.sort(key=lambda item: (-item[0], item[1], item[2]))
+    return [_stop_row(item[3]) for item in scored[:RESULT_LIMIT]]
+
+
 def _parse_bbox(bbox):
     """Shared closed-bounds semantics with the 003 stops list."""
     try:
@@ -242,6 +283,8 @@ def search_stops(query=None, bbox=None):
         .order_by("name", "id")[:RESULT_LIMIT]
     )
     rows = [_stop_row(s) for s in matches]
+    if not rows:
+        rows = _token_overlap_rows(text)
     if not rows:
         return {"ok": True, "status": "empty", "stops": []}
     return {"ok": True, "status": "ok", "stops": rows}
@@ -532,6 +575,8 @@ def search_places(query=None, bbox=None):
             "error": "Give a stop name fragment or a map area to search.",
         }
     rows = [_stop_row(stop) for stop in matches]
+    if not rows and has_query:
+        rows = _token_overlap_rows(text)
     if not rows:
         return {"ok": True, "status": "empty", "groups": []}
     buckets = {}
