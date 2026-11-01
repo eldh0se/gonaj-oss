@@ -165,3 +165,68 @@ describe("MapView", () => {
     expect(lastMap().remove).toHaveBeenCalled();
   });
 });
+
+describe("MapView candidate view", () => {
+  beforeEach(() => {
+    const mock = leafletMock();
+    mock.maps.length = 0;
+    mock.layers.length = 0;
+    vi.clearAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("fits bounds once per change", () => {
+    const noop = () => {};
+    const { rerender } = render(
+      <MapView markers={[]} onAreaChange={noop} fitBounds={null} />
+    );
+    const bounds = { south: 9.98, west: 76.28, north: 9.99, lon: 0, east: 76.3 };
+    rerender(
+      <MapView markers={[]} onAreaChange={noop} fitBounds={bounds} />
+    );
+    const map = lastMap();
+    expect(map.fitBounds).toHaveBeenCalledTimes(1);
+    expect(map.fitBounds.mock.calls[0][0]).toEqual([
+      [9.98, 76.28],
+      [9.99, 76.3],
+    ]);
+    rerender(
+      <MapView markers={[]} onAreaChange={noop} fitBounds={bounds} />
+    );
+    expect(map.fitBounds).toHaveBeenCalledTimes(1);
+  });
+
+  it("refits after the candidate view clears", () => {
+    const noop = () => {};
+    const bounds = { south: 9.98, west: 76.28, north: 9.99, east: 76.3 };
+    const { rerender } = render(
+      <MapView markers={[]} onAreaChange={noop} fitBounds={bounds} />
+    );
+    const map = lastMap();
+    expect(map.fitBounds).toHaveBeenCalledTimes(1);
+    rerender(<MapView markers={[]} onAreaChange={noop} fitBounds={null} />);
+    rerender(
+      <MapView markers={[]} onAreaChange={noop} fitBounds={bounds} />
+    );
+    expect(map.fitBounds).toHaveBeenCalledTimes(2);
+  });
+
+  it("highlights candidate pins distinctly", () => {
+    const noop = () => {};
+    render(
+      <MapView
+        markers={[
+          { id: 1, name: "A", lat: 9.97, lon: 76.28 },
+          { id: 2, name: "B", lat: 9.98, lon: 76.29 },
+        ]}
+        highlightIds={[2]}
+        onAreaChange={noop}
+      />
+    );
+    const mock = leafletMock();
+    expect(mock.L.circleMarker).toHaveBeenCalledTimes(2);
+    const styles = mock.L.circleMarker.mock.calls.map(([, opts]) => opts.fillColor);
+    expect(styles[0]).toBe("#0b6e4f");
+    expect(styles[1]).not.toBe("#0b6e4f");
+  });
+});

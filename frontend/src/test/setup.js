@@ -59,6 +59,9 @@ export function createLeafletMock() {
         remove: vi.fn(),
         invalidateSize: vi.fn(),
         getZoom: vi.fn(() => 14),
+        fitBounds: vi.fn(function fitBounds() {
+          return this;
+        }),
         getBounds: vi.fn(() => ({
           getWest: () => 76.2,
           getSouth: () => 9.9,

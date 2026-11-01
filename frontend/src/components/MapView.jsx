@@ -25,6 +25,8 @@ export default function MapView({
   highlight = null,
   center = null,
   selectedId = null,
+  highlightIds = [],
+  fitBounds = null,
   onAreaChange,
   onSelectStop,
 }) {
@@ -77,16 +79,22 @@ export default function MapView({
     layer.clearLayers();
     for (const marker of markers) {
       const selected = marker.id === selectedId;
+      const highlighted =
+        !selected &&
+        Array.isArray(highlightIds) &&
+        highlightIds.includes(marker.id);
       L.circleMarker(
         [marker.lat, marker.lon],
         selected
           ? { radius: 10, color: "#ffffff", weight: 3, fillColor: "#084d38", fillOpacity: 1 }
-          : { radius: 7, color: "#ffffff", weight: 2, fillColor: "#0b6e4f", fillOpacity: 0.95 }
+          : highlighted
+            ? { radius: 9, color: "#ffffff", weight: 3, fillColor: "#b45309", fillOpacity: 1 }
+            : { radius: 7, color: "#ffffff", weight: 2, fillColor: "#0b6e4f", fillOpacity: 0.95 }
       )
         .on("click", () => onSelectStopRef.current?.(marker))
         .addTo(layer);
     }
-  }, [markers, selectedId]);
+  }, [markers, selectedId, highlightIds]);
 
   useEffect(() => {
     const layer = highlightLayerRef.current;
@@ -96,6 +104,22 @@ export default function MapView({
       L.polyline(highlight, { color: "#0b6e4f", weight: 4, opacity: 0.9 }).addTo(layer);
     }
   }, [highlight]);
+
+  const fitKeyRef = useRef(null);
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (!fitBounds) {
+      fitKeyRef.current = null;
+      return;
+    }
+    const key = JSON.stringify(fitBounds);
+    if (fitKeyRef.current === key) return;
+    fitKeyRef.current = key;
+    mapRef.current.fitBounds?.([
+      [fitBounds.south, fitBounds.west],
+      [fitBounds.north, fitBounds.east],
+    ]);
+  }, [fitBounds]);
 
   useEffect(() => {
     if (center && mapRef.current) {

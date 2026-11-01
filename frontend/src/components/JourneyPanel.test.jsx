@@ -455,3 +455,179 @@ describe("JourneyPanel", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("JourneyPanel map choice", () => {
+  const geoCandidates = {
+    status: "disambiguate",
+    message: "I found more than one stop called North. Which one did you mean?",
+    candidates: [
+      { id: 201, name: "North Hub", lat: 10.05, lon: 76.3, detail: "10.0500,76.3000" },
+      { id: 312, name: "North Edge", lat: 10.06, lon: 76.31 },
+    ],
+    slot: "from",
+    resolved: { id: 11, name: "Ernakulam South" },
+    offered_ids: [201, 312],
+    meta: { model: "muse-spark-1.3", provider: "meta", latency_ms: 480 },
+  };
+
+  function renderWithChoice(payload, props = {}) {
+    const fetch = vi.fn(async () => ({ ok: true, json: async () => payload }));
+    vi.stubGlobal("fetch", fetch);
+    const utils = render(<JourneyPanel {...props} />);
+    return { fetch, ...utils };
+  }
+
+  it("fits the map to every candidate pin", async () => {
+    const onShowCandidates = vi.fn();
+    renderWithChoice(geoCandidates, { onShowCandidates });
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "How do I get from North to South?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    await screen.findByText(/which one did you mean/i);
+    expect(onShowCandidates).toHaveBeenCalledTimes(1);
+    const view = onShowCandidates.mock.calls[0][0];
+    const lats = [10.05, 10.06];
+    const lons = [76.3, 76.31];
+    expect(view.bounds.south).toBeLessThanOrEqual(Math.min(...lats));
+    expect(view.bounds.north).toBeGreaterThanOrEqual(Math.max(...lats));
+    expect(view.bounds.west).toBeLessThanOrEqual(Math.min(...lons));
+    expect(view.bounds.east).toBeGreaterThanOrEqual(Math.max(...lons));
+    expect(view.stops.map((s) => s.id).sort()).toEqual([201, 312]);
+    vi.unstubAllGlobals();
+  });
+
+  it("sends identical payloads for pin taps and list buttons", async () => {
+    const bodies = [];
+    const fetch = vi.fn(async (url, options) => {
+      const body = JSON.parse(options.body);
+      bodies.push(body);
+      return {
+        ok: true,
+        json: async () =>
+          bodies.length === 1
+            ? geoCandidates
+            : {
+                status: "refuse",
+                message: "I could not find a direct service between those stops.",
+                meta: { model: "none", provider: "local-fallback", latency_ms: 5 },
+              },
+      };
+    });
+    vi.stubGlobal("fetch", fetch);
+    const chooseRef = { current: null };
+    render(<JourneyPanel chooseRef={chooseRef} />);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "How do I get from North to South?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    await screen.findByText(/which one did you mean/i);
+    chooseRef.current({ id: 201, name: "North Hub" });
+    await vi.waitFor(() => expect(bodies.length).toBe(2));
+    expect(bodies[1].question).toBe("North Hub");
+    expect(bodies[1].history).toEqual([
+      { role: "user", content: "How do I get from North to South?" },
+    ]);
+    expect(bodies[1].context).toEqual({
+      candidate_stop_ids: [201, 312],
+      selected_stop_id: 201,
+      slot: "from",
+      resolved: { id: 11, name: "Ernakulam South" },
+      slots: undefined,
+      surviving_context: undefined,
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("none of these resets to a fresh question", async () => {
+    const bodies = [];
+    const fetch = vi.fn(async (url, options) => {
+      const body = JSON.parse(options.body);
+      bodies.push(body);
+      return {
+        ok: true,
+        json: async () =>
+          bodies.length === 1
+            ? geoCandidates
+            : {
+                status: "refuse",
+                message: "Please ask me a journey question.",
+                meta: { model: "muse-spark-1.3", provider: "meta", latency_ms: 5 },
+              },
+      };
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<JourneyPanel />);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "How do I get from North to South?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /none of these/i }));
+    await vi.waitFor(() => expect(bodies.length).toBe(2));
+    expect(bodies[1].history).toEqual([]);
+    expect(bodies[1].context).toEqual({});
+    expect(bodies[1].question).toBe("How do I get from North to South?");
+    vi.unstubAllGlobals();
+  });
+
+  it("dismiss hides map help while the text list still resolves", async () => {
+    const onShowCandidates = vi.fn();
+    const bodies = [];
+    const fetch = vi.fn(async (url, options) => {
+      const body = JSON.parse(options.body);
+      bodies.push(body);
+      return {
+        ok: true,
+        json: async () =>
+          bodies.length === 1
+            ? geoCandidates
+            : {
+                status: "refuse",
+                message: "I could not find a direct service between those stops.",
+                meta: { model: "none", provider: "local-fallback", latency_ms: 5 },
+              },
+      };
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<JourneyPanel onShowCandidates={onShowCandidates} />);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "How do I get from North to South?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    await screen.findByText(/which one did you mean/i);
+    expect(screen.getByRole("button", { name: /North Hub/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /hide map/i }));
+    expect(onShowCandidates).toHaveBeenLastCalledWith(null);
+    fireEvent.click(screen.getByRole("button", { name: /North Hub/ }));
+    await screen.findByText(/could not find a direct service/i);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].context.selected_stop_id).toBe(201);
+    vi.unstubAllGlobals();
+  });
+
+  it("opt-out sends no coordinates and never locates", async () => {
+    const getCurrentPosition = vi.fn();
+    Object.defineProperty(globalThis.navigator, "geolocation", {
+      value: { getCurrentPosition },
+      configurable: true,
+    });
+    const bodies = [];
+    const fetch = vi.fn(async (url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return { ok: true, json: async () => geoCandidates };
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<JourneyPanel />);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "How do I get from North to South?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    await screen.findByText(/which one did you mean/i);
+    const serialized = JSON.stringify(bodies);
+    expect(serialized).not.toMatch(/"lat"|"lon"|"latitude"|"longitude"|"coords"/);
+    expect(getCurrentPosition).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+    // @ts-ignore jsdom cleanup
+    delete globalThis.navigator.geolocation;
+  });
+});
