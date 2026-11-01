@@ -55,6 +55,9 @@ export function MapPage() {
   const [stopCard, setStopCard] = useState(null);
   const [overlay, setOverlay] = useState({ state: "idle", detail: null, errorDetail: "" });
   const [center, setCenter] = useState(null);
+  const [candidateView, setCandidateView] = useState(null);
+  const [locateOptIn, setLocateOptIn] = useState(false);
+  const panelChooseRef = useRef(null);
 
   const areaAbort = useRef(null);
   const searchAbort = useRef(null);
@@ -209,6 +212,33 @@ export function MapPage() {
     );
   }, []);
 
+  const handleShowCandidates = useCallback((view, _payload) => {
+    setCandidateView(view);
+  }, []);
+
+  const handleMapTap = useCallback(
+    (marker) => {
+      const ids = new Set((candidateView?.stops ?? []).map((s) => s.id));
+      if (ids.has(marker.id)) {
+        panelChooseRef.current?.({ id: marker.id, name: marker.name });
+        return;
+      }
+      handleSelectStop(marker);
+    },
+    [candidateView, handleSelectStop]
+  );
+
+  const handleLocateOptIn = useCallback(() => {
+    setLocateOptIn(true);
+    navigator.geolocation?.getCurrentPosition?.((position) => {
+      setCenter({
+        lat: position.coords.latitude,
+        lon: position.coords.longitude,
+        nonce: Date.now(),
+      });
+    });
+  }, []);
+
   const handleDismissOverlay = useCallback(() => {
     navigate("/");
   }, [navigate]);
@@ -230,9 +260,16 @@ export function MapPage() {
             selectedId={
               stopCard?.state === "ok" && stopCard.detail ? stopCard.detail.id : null
             }
+            highlightIds={(candidateView?.stops ?? []).map((s) => s.id)}
+            fitBounds={candidateView?.bounds ?? null}
             onAreaChange={handleAreaChange}
-            onSelectStop={handleSelectStop}
+            onSelectStop={handleMapTap}
           />
+          {!locateOptIn && (
+            <button type="button" onClick={handleLocateOptIn}>
+              Show my location
+            </button>
+          )}
           {area.status === "loading" && (
             <p role="status" className="gonaj-area-note">Loading stops…</p>
           )}
@@ -260,7 +297,12 @@ export function MapPage() {
             onSelectStop={handleSelectStop}
             onRoutePage={setRoutePage}
             onStopPage={setStopPage}
-            journeyContent={<JourneyPanel />}
+            journeyContent={
+              <JourneyPanel
+                onShowCandidates={handleShowCandidates}
+                chooseRef={panelChooseRef}
+              />
+            }
           />
         </aside>
       </div>

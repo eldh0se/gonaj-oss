@@ -973,3 +973,72 @@ class SelectionTests(ApiTestCase):
         self.assertEqual(body["offered_ids"], [self.a1.id, self.a2.id])
         self.assertEqual(body["resolved"]["id"], self.keast.id)
         self.assertTrue(all("detail" in c for c in body["candidates"]))
+
+
+class MapChoiceBackendTests(ApiTestCase):
+    """011: disambiguate candidates carry coordinates for map fitting."""
+
+    @classmethod
+    def setUpTestData(cls):
+        _, cls.import_run = f.make_snapshot(label="factory-mapchoice")
+        cls.master = f.make_master(
+            cls.import_run, 91, "MapLoop", operator="KSRTC",
+            network="Kochi",
+        )
+        cls.hub = f.make_stop(
+            cls.import_run, 911, "North Hub", 10.05, 76.30
+        )
+        cls.edge = f.make_stop(
+            cls.import_run, 912, "North Edge", 10.06, 76.31
+        )
+        cls.south = f.make_stop(
+            cls.import_run, 913, "Ernakulam South", 9.97, 76.28
+        )
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self._real = provider.complete_with_tools
+
+    def tearDown(self):
+        provider.complete_with_tools = self._real
+
+    def test_disambiguate_candidates_carry_coordinates(self):
+        stub = StubModel(
+            script=[
+                _Response(
+                    _Message(
+                        tool_calls=[
+                            _ToolCall(
+                                "c1",
+                                "search_stops",
+                                json.dumps({"query": "North"}),
+                            )
+                        ]
+                    )
+                ),
+                _Response(
+                    _Message(
+                        tool_calls=[
+                            _ToolCall(
+                                "c2",
+                                "search_stops",
+                                json.dumps({"query": "Ernakulam South"}),
+                            )
+                        ]
+                    )
+                ),
+                _Response(_Message(content="Which stop did you mean?")),
+            ]
+        )
+        provider.complete_with_tools = stub
+        body = self.client.post(
+            "/api/v1/journey/",
+            {"question": "How do I get from North to Ernakulam South?"},
+            format="json",
+        ).json()
+        self.assertEqual(body["status"], "disambiguate")
+        self.assertTrue(len(body["candidates"]) >= 2)
+        for candidate in body["candidates"]:
+            self.assertIsInstance(candidate["lat"], float)
+            self.assertIsInstance(candidate["lon"], float)

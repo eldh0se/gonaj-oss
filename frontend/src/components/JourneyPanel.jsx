@@ -77,9 +77,41 @@ function StopPicker({ label, text, onTextChange, selected, onSelect, onClear }) 
   );
 }
 
-export default function JourneyPanel() {
+function boundsFor(candidates, groups) {
+  const points = [];
+  for (const c of candidates ?? []) {
+    if (typeof c?.lat === "number" && typeof c?.lon === "number") {
+      points.push([c.lat, c.lon]);
+    }
+  }
+  for (const g of groups ?? []) {
+    const b = g?.bbox;
+    if (
+      b &&
+      typeof b.min_lat === "number" &&
+      typeof b.max_lat === "number" &&
+      typeof b.min_lon === "number" &&
+      typeof b.max_lon === "number"
+    ) {
+      points.push([b.min_lat, b.min_lon], [b.max_lat, b.max_lon]);
+    }
+  }
+  if (points.length === 0) return null;
+  return {
+    south: Math.min(...points.map(([lat]) => lat)),
+    west: Math.min(...points.map(([, lon]) => lon)),
+    north: Math.max(...points.map(([lat]) => lat)),
+    east: Math.max(...points.map(([, lon]) => lon)),
+  };
+}
+
+export default function JourneyPanel({
+  onShowCandidates,
+  chooseRef,
+} = {}) {
   const [question, setQuestion] = useState("");
   const [state, setState] = useState({ status: "idle" });
+  const [mapHelpDismissed, setMapHelpDismissed] = useState(false);
   const [recording, setRecording] = useState(false);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -191,6 +223,50 @@ export default function JourneyPanel() {
     }
   }
 
+  const lastPayloadRef = useRef(null);
+  if (chooseRef) {
+    chooseRef.current = (candidate) => {
+      if (lastPayloadRef.current) choose(candidate, lastPayloadRef.current);
+    };
+  }
+
+  function showCandidates(payload) {
+    lastPayloadRef.current = payload;
+    if (mapHelpDismissed || !onShowCandidates) return;
+    const candidates = payload.candidates ?? [];
+    const bounds = boundsFor(candidates, payload.groups);
+    if (!bounds) return;
+    onShowCandidates(
+      {
+        bounds,
+        stops: candidates.map((c) => ({
+          id: c.id,
+          name: c.name,
+          lat: c.lat,
+          lon: c.lon,
+          detail: c.detail,
+        })),
+      },
+      payload
+    );
+  }
+
+  function hideCandidates() {
+    lastPayloadRef.current = null;
+    onShowCandidates?.(null);
+  }
+
+  function noneOfThese() {
+    // Guided retry: forget the stale candidates and re-ask fresh.
+    hideCandidates();
+    ask(question, {}, []);
+  }
+
+  function dismissMapHelp() {
+    setMapHelpDismissed(true);
+    onShowCandidates?.(null);
+  }
+
   async function ask(text, context, history) {
     const wording = (text ?? question).trim();
     if (!wording) {
@@ -206,6 +282,7 @@ export default function JourneyPanel() {
     askAbort.current?.abort();
     directAbort.current?.abort();
     setDirect({ status: "idle" });
+    setMapHelpDismissed(false);
     const controller = new AbortController();
     askAbort.current = controller;
     setState({ status: "loading" });
@@ -219,10 +296,13 @@ export default function JourneyPanel() {
         { signal: controller.signal }
       );
       if (body.status === "ok") {
+        hideCandidates();
         setState({ status: "ok", payload: body });
       } else if (body.status === "disambiguate") {
         setState({ status: "disambiguate", payload: body });
+        showCandidates(body);
       } else {
+        hideCandidates();
         setState({ status: "refuse", message: body.message });
       }
     } catch (err) {
@@ -379,6 +459,12 @@ export default function JourneyPanel() {
           <div aria-label="Choose a stop">
             <p className="gonaj-unverified">Unverified AI answer</p>
             <p>{state.payload.message}</p>
+            {!mapHelpDismissed && (
+              <p className="gonaj-journey-map-hint">
+                The map is fitted to these stops — pick a highlighted pin
+                or choose from the list.
+              </p>
+            )}
             <ul className="gonaj-journey-candidates">
               {(state.payload.candidates ?? []).map((candidate) => (
                 <li key={candidate.id}>
@@ -392,6 +478,18 @@ export default function JourneyPanel() {
                 </li>
               ))}
             </ul>
+            <button type="button" onClick={noneOfThese}>
+              None of these
+            </button>
+            <p className="gonaj-journey-rephrase">
+              Not these? Answer none of these and try rephrasing with a
+              nearby landmark.
+            </p>
+            {!mapHelpDismissed && onShowCandidates && (
+              <button type="button" onClick={dismissMapHelp}>
+                Hide map
+              </button>
+            )}
           </div>
         )}
 

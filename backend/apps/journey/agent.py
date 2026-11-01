@@ -130,10 +130,13 @@ def _candidate_detail(stop):
         return ""
 
 
-def _candidate_entry(stop_id, name, detail):
+def _candidate_entry(stop_id, name, detail, lat=None, lon=None):
     entry = {"id": stop_id, "name": name}
     if detail:
         entry["detail"] = detail
+    if lat is not None and lon is not None:
+        entry["lat"] = lat
+        entry["lon"] = lon
     return entry
 
 
@@ -443,6 +446,8 @@ def _disambiguation_context(question, searches):
                     stop["id"],
                     stop["name"],
                     _candidate_detail_from_row(stop),
+                    stop.get("lat"),
+                    stop.get("lon"),
                 )
                 for stop in stops
             ],
@@ -466,7 +471,11 @@ def _disambiguation_context(question, searches):
         "First, which origin did you mean?",
         "candidates": [
             _candidate_entry(
-                stop["id"], stop["name"], _candidate_detail_from_row(stop)
+                stop["id"],
+                stop["name"],
+                _candidate_detail_from_row(stop),
+                stop.get("lat"),
+                stop.get("lon"),
             )
             for stop in stops
         ],
@@ -777,7 +786,11 @@ def run_journey(*, question, history=(), context=None):
         stops = Stop.objects.filter(pk__in=remaining_ids).in_bulk()
         candidates = [
             _candidate_entry(
-                sid, (stops[sid].name or ""), _candidate_detail(stops[sid])
+                sid,
+                (stops[sid].name or ""),
+                _candidate_detail(stops[sid]),
+                stops[sid].lat,
+                stops[sid].lon,
             )
             for sid in remaining_ids
             if sid in stops
