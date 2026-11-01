@@ -66,6 +66,66 @@ TOOL_SCHEMAS = {
         "required": ["route_id"],
         "additionalProperties": False,
     },
+    "search_places": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Place-name fragment; one end of the journey question.",
+            },
+            "bbox": {
+                "type": "string",
+                "description": "Closed bounds min_lon,min_lat,max_lon,max_lat for a map-derived end. Never combined with query.",
+            },
+        },
+        "required": [],
+        "additionalProperties": False,
+    },
+    "find_routes_matrix": {
+        "type": "object",
+        "properties": {
+            "from_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Origin member stop ids (group members, nearest-end first).",
+            },
+            "to_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Destination member stop ids.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum pairs tested, nearest first. Defaults to the pair cap.",
+            },
+        },
+        "required": ["from_ids", "to_ids"],
+        "additionalProperties": False,
+    },
+    "distance_m": {
+        "type": "object",
+        "properties": {
+            "lat1": {"type": "number"},
+            "lon1": {"type": "number"},
+            "lat2": {"type": "number"},
+            "lon2": {"type": "number"},
+        },
+        "required": ["lat1", "lon1", "lat2", "lon2"],
+        "additionalProperties": False,
+    },
+    "nearby_stops": {
+        "type": "object",
+        "properties": {
+            "lat": {"type": "number"},
+            "lon": {"type": "number"},
+            "radius_m": {
+                "type": "number",
+                "description": "Search radius, default 500, maximum 2000.",
+            },
+        },
+        "required": ["lat", "lon"],
+        "additionalProperties": False,
+    },
 }
 
 RESULT_LIMIT = 100
@@ -90,6 +150,10 @@ _TOOL_DESCRIPTIONS = {
     "search_stops": "Find stops by name fragment or map area.",
     "find_routes": "Direct routes serving both stops in travelling order.",
     "get_route_detail": "One route with its ordered stops and evidence fields.",
+    "search_places": "Group same-named stops into places with members and route hints.",
+    "find_routes_matrix": "Direct routes for every origin/destination member pair.",
+    "distance_m": "Haversine meters between two points.",
+    "nearby_stops": "Stops around a point, nearest first.",
 }
 
 
@@ -436,7 +500,13 @@ def search_places(query=None, bbox=None):
             max_lon - min_lon > MAX_BBOX_SPAN_DEGREES
             or max_lat - min_lat > MAX_BBOX_SPAN_DEGREES
         ):
-            return {"ok": True, "status": "zoom_in", "groups": []}
+            return {
+                "ok": True,
+                "status": "zoom_in",
+                "groups": [],
+                "detail": "That area is too large to list stops for. "
+                "Please zoom in and try again.",
+            }
         matches = (
             Stop.objects.filter(
                 lon__gte=min_lon,
@@ -514,12 +584,18 @@ def _direct_pair_routes(from_stop_id, to_stop_id):
     return direct
 
 
-def find_routes_matrix(from_ids, to_ids):
-    """Direct routes for every ordered pair (read-only).
+MATRIX_PAIR_CAP = 200
+
+
+def find_routes_matrix(from_ids, to_ids, limit=MATRIX_PAIR_CAP):
+    """Direct routes for ordered pairs, nearest first (read-only).
 
     Equal-id pairs are skipped; unknown ids error like
     :func:`find_routes`. Only pairs with at least one travelling-order
-    direct route appear, so opposite-direction pairs drop out.
+    direct route appear, so opposite-direction pairs drop out. Pairs are
+    tested in ascending minimum member-to-member haversine order and at
+    most ``limit`` pairs are tested; ``truncated`` reports whether pairs
+    went untested, with their destination ids in ``untested_to_ids``.
     """
     try:
         sources = [int(value) for value in (from_ids or [])]
@@ -534,29 +610,165 @@ def find_routes_matrix(from_ids, to_ids):
             "ok": False,
             "error": "Stop ids must be positive integers.",
         }
-    known = set(
-        Stop.objects.filter(pk__in=set(sources) | set(targets)).values_list(
-            "pk", flat=True
-        )
-    )
+    try:
+        cap = int(limit)
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "error": "Give a positive pair limit.",
+        }
+    if cap < 1:
+        return {
+            "ok": False,
+            "error": "Give a positive pair limit.",
+        }
+    known = {
+        row["id"]: (row["lat"], row["lon"])
+        for row in Stop.objects.filter(
+            pk__in=set(sources) | set(targets)
+        ).values("id", "lat", "lon")
+    }
     if len(known) != len(set(sources) | set(targets)):
         return {
             "ok": False,
             "error": "I could not find one of those stops. "
             "Please check the names and try again.",
         }
-    pairs = []
+    ordered = []
     for from_id in sources:
         for to_id in targets:
             if from_id == to_id:
                 continue
-            routes = _direct_pair_routes(from_id, to_id)
-            if routes:
-                pairs.append(
-                    {
-                        "from_stop_id": from_id,
-                        "to_stop_id": to_id,
-                        "routes": routes,
-                    }
-                )
-    return {"ok": True, "pairs": pairs}
+            from_lat, from_lon = known[from_id]
+            to_lat, to_lon = known[to_id]
+            coords = (from_lat, from_lon, to_lat, to_lon)
+            if any(value is None for value in coords):
+                gap = float("inf")
+            else:
+                gap = _haversine_m(from_lat, from_lon, to_lat, to_lon)
+            ordered.append((gap, from_id, to_id))
+    ordered.sort(key=lambda item: (item[0], item[1], item[2]))
+    tested = ordered[:cap]
+    untested = ordered[cap:]
+    pairs = []
+    for _, from_id, to_id in tested:
+        routes = _direct_pair_routes(from_id, to_id)
+        if routes:
+            pairs.append(
+                {
+                    "from_stop_id": from_id,
+                    "to_stop_id": to_id,
+                    "routes": routes,
+                }
+            )
+    untested_from_ids = []
+    untested_to_ids = []
+    for _, from_id, to_id in untested:
+        if from_id not in untested_from_ids:
+            untested_from_ids.append(from_id)
+        if to_id not in untested_to_ids:
+            untested_to_ids.append(to_id)
+    return {
+        "ok": True,
+        "pairs": pairs,
+        "truncated": bool(untested),
+        "untested_from_ids": untested_from_ids,
+        "untested_to_ids": untested_to_ids,
+    }
+
+
+def _is_finite_number(value):
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def distance_m(lat1, lon1, lat2, lon2):
+    """Haversine meters between two points (read-only, SQLite-portable)."""
+    coords = (lat1, lon1, lat2, lon2)
+    if not all(_is_finite_number(value) for value in coords):
+        return {
+            "ok": False,
+            "error": "Give four numbers as lat1, lon1, lat2, lon2.",
+        }
+    if not (
+        -90 <= lat1 <= 90
+        and -90 <= lat2 <= 90
+        and -180 <= lon1 <= 180
+        and -180 <= lon2 <= 180
+    ):
+        return {
+            "ok": False,
+            "error": "Latitudes stay within -90 to 90, "
+            "longitudes within -180 to 180.",
+        }
+    return {
+        "ok": True,
+        "distance_m": _haversine_m(
+            float(lat1), float(lon1), float(lat2), float(lon2)
+        ),
+    }
+
+
+NEARBY_STOPS_DEFAULT_RADIUS_M = 500.0
+NEARBY_STOPS_MAX_RADIUS_M = 2000.0
+
+
+def nearby_stops(lat, lon, radius_m=NEARBY_STOPS_DEFAULT_RADIUS_M):
+    """Stops around a point, nearest first (read-only, SQLite-portable).
+
+    DB bbox prefilter plus pure-Python haversine filtering; at most
+    ``RESULT_LIMIT`` stops, ordered by ascending ``distance_m``.
+    """
+    if not _is_finite_number(lat) or not _is_finite_number(lon):
+        return {
+            "ok": False,
+            "error": "Give numbers for lat and lon.",
+        }
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return {
+            "ok": False,
+            "error": "Latitudes stay within -90 to 90, "
+            "longitudes within -180 to 180.",
+        }
+    if not _is_finite_number(radius_m) or not (
+        0 < radius_m <= NEARBY_STOPS_MAX_RADIUS_M
+    ):
+        return {
+            "ok": False,
+            "error": "Search within 0 to 2000 meters of the point.",
+        }
+    half_lat = radius_m / 111320.0
+    half_lon = radius_m / (
+        111320.0 * max(math.cos(math.radians(lat)), 1e-6)
+    )
+    rows = [
+        _stop_row(stop)
+        for stop in Stop.objects.filter(
+            lat__gte=lat - half_lat,
+            lat__lte=lat + half_lat,
+            lon__gte=lon - half_lon,
+            lon__lte=lon + half_lon,
+        ).order_by("name", "id")
+    ]
+    measured = []
+    for row in rows:
+        gap = _haversine_m(lat, lon, row["lat"], row["lon"])
+        if gap <= radius_m:
+            measured.append((gap, row))
+    measured.sort(key=lambda item: (item[0], item[1]["id"]))
+    return {
+        "ok": True,
+        "stops": [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "lat": row["lat"],
+                "lon": row["lon"],
+                "distance_m": gap,
+            }
+            for gap, row in measured[:RESULT_LIMIT]
+        ],
+    }

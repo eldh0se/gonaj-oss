@@ -24,13 +24,16 @@ MAX_TOOL_TURNS = 4
 SYSTEM_PROMPT = (
     "You are the Gonaj journey helper. Answer in everyday language "
     "about direct bus services only, using the read-only tools. "
-    "Every route you cite must come from a find_routes or "
-    "get_route_detail result, and you must cite it as /routes/:id. "
+    "Resolve both ends to place groups with search_places first, then "
+    "test member pairs with find_routes_matrix, and cite every route "
+    "from a get_route_detail result as /routes/:id with a walk-distance "
+    "note. A route counts only when the boarding stop comes before the "
+    "alighting stop on it. Same names do not mean the same stop; nearby "
+    "stops within walking distance count as reachable — state the exact "
+    "stop plus nearby stops with walk distances. "
     "Never mention schedules, departure or arrival times, durations, "
-    "frequencies, or transfers. If a stop name matches several stops, "
-    "do not guess: ask the passenger to choose. If no direct service "
-    "is known, or a place cannot be found, say so plainly and invent "
-    "nothing."
+    "frequencies, or transfers. If no direct service is known, or a "
+    "place cannot be found, say so plainly and invent nothing."
 )
 
 REPAIR_NUDGE = (
@@ -57,6 +60,10 @@ _TOOL_FUNCTIONS = {
     "search_stops": tools.search_stops,
     "find_routes": tools.find_routes,
     "get_route_detail": tools.get_route_detail,
+    "search_places": tools.search_places,
+    "find_routes_matrix": tools.find_routes_matrix,
+    "distance_m": tools.distance_m,
+    "nearby_stops": tools.nearby_stops,
 }
 
 _ASK_AGAIN = (
@@ -242,40 +249,6 @@ def _resolve_selection(context, question):
     return ("partial", slot, selected, remaining, remaining_ids, slots)
 
 
-def _remaining_from_question(question, known_slot, known_id, tracker):
-    """Derive the other end from a from/to question without the model.
-
-    Returns ("answer", from_id, to_id) for a singleton match,
-    ("prompt", ids) for several matches, ("unknown",) when nothing
-    matches, or (None,) when the question carries no usable other end.
-    """
-    match = _FROM_TO.search(question or "")
-    if not match:
-        return (None,)
-    if known_slot == "from":
-        other_text = match.group(2).strip()
-    else:
-        other_text = match.group(1).strip()
-    if not other_text:
-        return (None,)
-    result = tools.search_stops(query=other_text)
-    tracker["tools_used"].append("search_stops")
-    tracker["calls"].append(
-        ("search_stops", {"query": other_text}, result)
-    )
-    if not result.get("ok"):
-        return (None,)
-    stops = result.get("stops") or []
-    if not stops:
-        return ("unknown",)
-    if len(stops) == 1:
-        other_id = stops[0]["id"]
-        if known_slot == "from":
-            return ("answer", known_id, other_id)
-        return ("answer", other_id, known_id)
-    return ("prompt", [stop["id"] for stop in stops])
-
-
 def _selection_meta(latency_ms):
     """Local-selection meta: outage fallback shape plus a resolution key."""
     meta = _meta(latency_ms, fallback=True)
@@ -330,6 +303,11 @@ def _rank_pairs(pairs, operators=None, names=None):
             "boarding_stop": {"id": from_id, "name": from_name},
             "alighting_stop": {"id": to_id, "name": to_name},
             "stop_count": len(stops),
+            "also_nearby_boarding": (pair or {}).get("mates_from") or [],
+            "also_nearby": (pair or {}).get("mates_to") or [],
+            "overflow_nearby_boarding": (pair or {}).get("overflow_from")
+            or 0,
+            "overflow_nearby": (pair or {}).get("overflow_to") or 0,
         }
         origin = route.get("origin") or ""
         if from_name:
@@ -371,6 +349,14 @@ def rank_pairs(pairs, operators=None, names=None, destinations=None):
                 f"Take the {option['route']['name'] or 'direct'} service "
                 f"from {option['boarding_stop']['name']} "
                 f"to {option['alighting_stop']['name']}."
+            ) + _walk_note(
+                option["boarding_stop"]["name"],
+                option["also_nearby_boarding"],
+                option["overflow_nearby_boarding"],
+            ) + _walk_note(
+                option["alighting_stop"]["name"],
+                option["also_nearby"],
+                option["overflow_nearby"],
             )
     else:
         sentences = []
@@ -382,6 +368,16 @@ def rank_pairs(pairs, operators=None, names=None, destinations=None):
                     f"from {option['boarding_stop']['name']} "
                     f"to {option['alighting_stop']['name']}, "
                     f"see {option['route']['evidence']}."
+                    + _walk_note(
+                        option["boarding_stop"]["name"],
+                        option["also_nearby_boarding"],
+                        option["overflow_nearby_boarding"],
+                    )
+                    + _walk_note(
+                        option["alighting_stop"]["name"],
+                        option["also_nearby"],
+                        option["overflow_nearby"],
+                    )
                 )
         answer = " ".join(sentences)
     if extra > 0:
@@ -545,10 +541,56 @@ def _validate_tool_args(name, args):
     for key in schema.get("required", []):
         if key not in args:
             return None
-    if name == "search_stops":
+    if name in ("search_stops", "search_places"):
         for key in ("query", "bbox"):
             if key in args and not isinstance(args[key], str):
                 return None
+    elif name == "find_routes_matrix":
+        for key in ("from_ids", "to_ids"):
+            ids = args.get(key)
+            if (
+                not isinstance(ids, list)
+                or not ids
+                or any(not _is_int(value) or value < 1 for value in ids)
+            ):
+                return None
+        if "limit" in args:
+            limit = args["limit"]
+            if not _is_int(limit) or limit < 1:
+                return None
+    elif name in ("distance_m", "nearby_stops"):
+        numeric_keys = (
+            ("lat1", "lon1", "lat2", "lon2")
+            if name == "distance_m"
+            else ("lat", "lon")
+        )
+        for key in numeric_keys:
+            value = args.get(key)
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+            ):
+                return None
+        if name == "distance_m":
+            lats = (args["lat1"], args["lat2"])
+            lons = (args["lon1"], args["lon2"])
+        else:
+            lats = (args["lat"],)
+            lons = (args["lon"],)
+            if "radius_m" in args:
+                radius = args["radius_m"]
+                if (
+                    not isinstance(radius, (int, float))
+                    or isinstance(radius, bool)
+                    or not (
+                        0
+                        < radius
+                        <= tools.NEARBY_STOPS_MAX_RADIUS_M
+                    )
+                ):
+                    return None
+        if any(abs(v) > 90 for v in lats) or any(abs(v) > 180 for v in lons):
+            return None
     else:
         for key in ("from_stop_id", "to_stop_id", "route_id"):
             if key in args and (
@@ -580,6 +622,11 @@ def execute_tool(name, args, tracker):
         pair = (validated["from_stop_id"], validated["to_stop_id"])
         for row in result.get("routes", []):
             tracker["findings"][row["id"]] = pair
+    if name == "find_routes_matrix" and result.get("ok"):
+        for pair in result.get("pairs", []):
+            found = (pair["from_stop_id"], pair["to_stop_id"])
+            for row in pair.get("routes", []):
+                tracker["findings"][row["id"]] = found
     if name == "search_stops" and result.get("ok"):
         tracker["searches"].append((validated, result))
     return result
@@ -615,9 +662,9 @@ def _model_turn(messages):
     return response.choices[0].message
 
 
-def _verify_route(route_id, from_id, to_id):
+def _verify_route(route_id, from_id, to_id, tracker):
     """Independent DB check: servable route holds both stops in order."""
-    detail = tools.get_route_detail(route_id)
+    detail = _direct_tool("get_route_detail", {"route_id": route_id}, tracker)
     if not detail.get("ok"):
         return None
     positions = {}
@@ -670,6 +717,395 @@ def _answer_payload(route, from_id, to_id, draft, meta):
     )
 
 
+WALK_MATE_LIMIT = 3
+WALK_MATE_RADIUS_M = 150.0
+
+
+def _direct_tool(name, args, tracker):
+    """Call a tool outside the model loop, still recording audit trail."""
+    tracker["tools_used"].append(name)
+    try:
+        result = _TOOL_FUNCTIONS[name](**args)
+    except Exception:
+        logger.exception("journey tool %s failed", name)
+        result = {
+            "ok": False,
+            "error": "That lookup failed. Please carry on without it.",
+        }
+    tracker["calls"].append((name, args, result))
+    return result
+
+
+def _member_ids(groups):
+    ids = []
+    for group in groups or []:
+        for member in group.get("members", []):
+            mid = member.get("id")
+            if _is_int(mid) and mid not in ids:
+                ids.append(mid)
+    return ids
+
+
+def _members_by_id(groups):
+    by_id = {}
+    for group in groups or []:
+        for member in group.get("members", []):
+            if _is_int(member.get("id")):
+                by_id[member["id"]] = member
+    return by_id
+
+
+def _group_for_stop(stop_id, tracker):
+    """Place group containing a stop id, via its name (group expansion)."""
+    try:
+        name = _stop_name(stop_id)
+    except Exception:
+        return None
+    if not name:
+        return None
+    result = _direct_tool("search_places", {"query": name}, tracker)
+    if not result.get("ok"):
+        return None
+    for group in result.get("groups", []):
+        if any(
+            member.get("id") == stop_id
+            for member in group.get("members", [])
+        ):
+            return group
+    return None
+
+
+def _resolve_end(text, tracker):
+    """Resolve one end's text to groups. Returns (groups, problem).
+
+    problem is None on success, else ("empty",) or ("zoom_in", detail).
+    """
+    result = _direct_tool("search_places", {"query": text}, tracker)
+    if not result.get("ok"):
+        return None, ("empty",)
+    if result.get("status") == "zoom_in":
+        return None, ("zoom_in", result.get("detail") or "")
+    groups = result.get("groups", [])
+    if not groups:
+        return None, ("empty",)
+    return groups, None
+
+
+def _mates_for(direct_id, direct, members, cache, tracker):
+    """Walkable same-group mates of an exact stop (nearest first).
+
+    Returns (shown_mates, overflow_count). Distances come from distance_m
+    (haversine, inclusive at 150m); walk_m is whole meters, half up.
+    """
+    if direct_id in cache:
+        return cache[direct_id]
+    mates = []
+    for member in members:
+        mid = member.get("id")
+        if mid == direct_id or not _is_int(mid):
+            continue
+        gap = _direct_tool(
+            "distance_m",
+            {
+                "lat1": direct.get("lat"),
+                "lon1": direct.get("lon"),
+                "lat2": member.get("lat"),
+                "lon2": member.get("lon"),
+            },
+            tracker,
+        )
+        if not gap.get("ok"):
+            continue
+        dist = gap["distance_m"]
+        if dist <= WALK_MATE_RADIUS_M:
+            mates.append(
+                {
+                    "id": mid,
+                    "name": member.get("name") or "",
+                    "walk_m": int(dist + 0.5),
+                }
+            )
+    mates.sort(key=lambda mate: (mate["walk_m"], mate["id"]))
+    shown = mates[:WALK_MATE_LIMIT]
+    result = (shown, len(mates) - len(shown))
+    cache[direct_id] = result
+    return result
+
+
+def _classify_pairs(viable, from_groups, to_groups, tracker):
+    """Verify each viable pair and attach walkable mates per end."""
+    from_by_id = _members_by_id(from_groups)
+    to_by_id = _members_by_id(to_groups)
+    from_members = list(from_by_id.values())
+    to_members = list(to_by_id.values())
+    from_cache = {}
+    to_cache = {}
+    classified = []
+    for pair in viable or []:
+        from_id = pair.get("from_stop_id")
+        to_id = pair.get("to_stop_id")
+        for row in pair.get("routes", []):
+            route = _verify_route(
+                row.get("id"), from_id, to_id, tracker
+            )
+            if route is None:
+                continue
+            mates_from, over_from = _mates_for(
+                from_id,
+                from_by_id.get(from_id, {}),
+                from_members,
+                from_cache,
+                tracker,
+            )
+            mates_to, over_to = _mates_for(
+                to_id,
+                to_by_id.get(to_id, {}),
+                to_members,
+                to_cache,
+                tracker,
+            )
+            classified.append(
+                {
+                    "route_id": route["id"],
+                    "from_id": from_id,
+                    "to_id": to_id,
+                    "mates_from": mates_from,
+                    "mates_to": mates_to,
+                    "overflow_from": over_from,
+                    "overflow_to": over_to,
+                }
+            )
+    return classified
+
+
+def _destinations_from_groups(ranked_groups):
+    """Unique alighting stops in ranked order (rank_pairs caps at 5)."""
+    seen = []
+    for group in ranked_groups:
+        for option in group.get("options", []):
+            stop = option.get("alighting_stop") or {}
+            if stop.get("id") not in [s["stop"]["id"] for s in seen]:
+                seen.append(
+                    {
+                        "stop": {
+                            "id": stop.get("id"),
+                            "name": stop.get("name") or "",
+                        },
+                        "evidence": option["route"]["evidence"],
+                    }
+                )
+    return seen
+
+
+def _answer_from_classified(classified, tracker):
+    """Ranked (payload, route, from, to) from classified pairs (no meta)."""
+    pairs = [
+        {
+            "route_id": item["route_id"],
+            "from_id": item["from_id"],
+            "to_id": item["to_id"],
+            "mates_from": item["mates_from"],
+            "mates_to": item["mates_to"],
+            "overflow_from": item["overflow_from"],
+            "overflow_to": item["overflow_to"],
+        }
+        for item in classified
+    ]
+    groups, by_id = _rank_pairs(pairs)
+    if not groups or not by_id:
+        return None
+    ranked = rank_pairs(
+        pairs, destinations=_destinations_from_groups(groups)
+    )
+    first = classified[0]
+    route = by_id[first["route_id"]][0]
+    return ranked, route, first["from_id"], first["to_id"]
+
+
+_TRUNCATED_MESSAGE = (
+    "There are many possible stops; I checked the nearest ones first. "
+    "Which destination did you mean?"
+)
+_FAMILIAR_SUGGEST = (
+    " If you know both exact stops, you can also try direct "
+    "from-to search."
+)
+
+
+def _matrix_answer(from_ids, to_ids, from_groups, to_groups, tracker):
+    """Matrix test + classify + answer.
+
+    Returns (answer_item_or_None, info) where info carries
+    ``truncated``, ``untested_from_ids`` and ``untested_to_ids``.
+    """
+    result = _direct_tool(
+        "find_routes_matrix",
+        {
+            "from_ids": list(from_ids),
+            "to_ids": list(to_ids),
+            "limit": tools.MATRIX_PAIR_CAP,
+        },
+        tracker,
+    )
+    info = {
+        "truncated": False,
+        "untested_from_ids": [],
+        "untested_to_ids": [],
+    }
+    if not result.get("ok"):
+        return None, info
+    info = {
+        "truncated": bool(result.get("truncated")),
+        "untested_from_ids": list(result.get("untested_from_ids", [])),
+        "untested_to_ids": list(result.get("untested_to_ids", [])),
+    }
+    classified = _classify_pairs(
+        result.get("pairs", []), from_groups, to_groups, tracker
+    )
+    if not classified:
+        return None, info
+    return _answer_from_classified(classified, tracker), info
+
+
+def _pick_payload(slot, offered_ids, resolved, message):
+    """Map/list pick payload; the pick re-enters the matrix flow."""
+    candidates = []
+    if offered_ids:
+        known = Stop.objects.filter(pk__in=list(offered_ids)).in_bulk()
+        for sid in offered_ids:
+            stop = known.get(sid)
+            if stop is None:
+                continue
+            candidates.append(
+                _candidate_entry(
+                    sid,
+                    stop.name or "",
+                    _candidate_detail(stop),
+                    stop.lat,
+                    stop.lon,
+                )
+            )
+    payload = {
+        "status": "disambiguate",
+        "message": message,
+        "candidates": candidates,
+        "slot": slot,
+        "offered_ids": list(offered_ids),
+    }
+    if resolved is not None:
+        payload["resolved"] = resolved
+    return payload
+
+
+def _expanded_singleton_answer(from_id, to_id, tracker):
+    """FR-010: exact-id pair failed; expand each end to its group and retry."""
+    group_f = _group_for_stop(from_id, tracker)
+    group_t = _group_for_stop(to_id, tracker)
+    from_ids = _member_ids([group_f]) if group_f else [from_id]
+    to_ids = _member_ids([group_t]) if group_t else [to_id]
+    if from_ids == [from_id] and to_ids == [to_id]:
+        return None, {
+            "truncated": False,
+            "untested_from_ids": [],
+            "untested_to_ids": [],
+        }
+    return _matrix_answer(
+        from_ids,
+        to_ids,
+        [group_f] if group_f else None,
+        [group_t] if group_t else None,
+        tracker,
+    )
+
+
+def _remaining_from_groups(question, known_slot, known_id, tracker):
+    """Derive the other end via search_places groups (replaces single-stop).
+
+    Returns (core, None) on answer, (None, "unknown") when unmatched,
+    (None, "noviable") when groups resolve but no pair works, or None
+    when the question carries no usable other end.
+    """
+    match = _FROM_TO.search(question or "")
+    if not match:
+        return None
+    if known_slot == "from":
+        other_text = match.group(2).strip()
+    else:
+        other_text = match.group(1).strip()
+    if not other_text:
+        return None
+    groups, problem = _resolve_end(other_text, tracker)
+    if groups is None:
+        return None, "unknown"
+    member_ids = _member_ids(groups)
+    if not member_ids:
+        return None, "unknown"
+    remaining_slot = "to" if known_slot == "from" else "from"
+    known_group = _group_for_stop(known_id, tracker)
+    known_groups = [known_group] if known_group else None
+    if known_slot == "from":
+        item, info = _matrix_answer(
+            [known_id], member_ids, known_groups, groups, tracker
+        )
+        untested = info["untested_to_ids"]
+    else:
+        item, info = _matrix_answer(
+            member_ids, [known_id], groups, known_groups, tracker
+        )
+        untested = info["untested_from_ids"]
+    if item is None:
+        if info["truncated"]:
+            return None, ("truncated", remaining_slot, untested)
+        return None, ("noviable",)
+    return item, None
+
+
+def _fresh_matrix_answer(question, tracker):
+    """Deterministic groups-first answer for from-to questions.
+
+    Returns (core, None) on answer, (None, (problem, ...)) for empty /
+    zoom_in / no-viable ends, or None when the question has no usable
+    two ends (falls through to the model loop).
+    """
+    match = _FROM_TO.search(question or "")
+    if not match:
+        return None
+    from_text = match.group(1).strip()
+    to_text = match.group(2).strip()
+    if not from_text or not to_text:
+        return None
+    from_groups, from_problem = _resolve_end(from_text, tracker)
+    to_groups, to_problem = _resolve_end(to_text, tracker)
+    if from_problem is not None or to_problem is not None:
+        failed = "from" if from_problem is not None else "to"
+        problem = from_problem or to_problem
+        if problem[0] == "zoom_in":
+            return None, ("zoom_in", problem[1])
+        return None, ("unknown", failed)
+    item, info = _matrix_answer(
+        _member_ids(from_groups),
+        _member_ids(to_groups),
+        from_groups,
+        to_groups,
+        tracker,
+    )
+    if item is None:
+        if info["truncated"]:
+            return None, ("truncated", "from", info["untested_from_ids"])
+        return None, ("noviable",)
+    return item, None
+
+
+def _walk_note(end_name, mates, overflow):
+    if not mates and not overflow:
+        return ""
+    bits = ", ".join(
+        f"{mate['name']} ({mate['walk_m']}m walk)" for mate in mates
+    )
+    extra = f" plus {overflow} more within 150m" if overflow else ""
+    return f" Also near {end_name}: {bits}{extra}."
+
+
 def run_journey(*, question, history=(), context=None):
     """Answer, disambiguate, or refuse one journey question.
 
@@ -713,7 +1149,8 @@ def run_journey(*, question, history=(), context=None):
         return payload
 
     def answer_direct(from_id, to_id):
-        """Local verified answer (or honest refusal) without any model call."""
+        """Retained leaf verifier (012 FR-011): single-pair verification
+        only, never an entry answer. All entries go via the matrix flow."""
         result = tools.find_routes(from_stop_id=from_id, to_stop_id=to_id)
         tracker["tools_used"].append("find_routes")
         tracker["calls"].append(
@@ -729,7 +1166,7 @@ def run_journey(*, question, history=(), context=None):
             for row in result.get("routes", []):
                 tracker["findings"][row["id"]] = pair
             for row in result.get("routes", []):
-                route = _verify_route(row["id"], from_id, to_id)
+                route = _verify_route(row["id"], from_id, to_id, tracker)
                 if route is not None:
                     verified.append((route, from_id, to_id))
         if not verified:
@@ -761,27 +1198,69 @@ def run_journey(*, question, history=(), context=None):
         )
     if selection[0] == "full":
         _, from_id, to_id = selection
-        return answer_direct(from_id, to_id)
+        item, info = _matrix_answer(
+            [from_id], [to_id], None, None, tracker
+        )
+        if item is None and not info["truncated"]:
+            item, info = _expanded_singleton_answer(from_id, to_id, tracker)
+        if item is None:
+            if info["truncated"]:
+                return selection_finish(
+                    _pick_payload(
+                        "to",
+                        info["untested_to_ids"],
+                        None,
+                        _TRUNCATED_MESSAGE,
+                    )
+                )
+            return selection_finish(
+                {
+                    "status": "refuse",
+                    "message": _NO_DIRECT + _FAMILIAR_SUGGEST,
+                }
+            )
+        ranked, route, from_id, to_id = item
+        payload = ranked_payload(ranked, route, from_id, to_id, "")
+        return selection_finish(payload)
     if selection[0] == "partial":
         _, known_slot, known_id, remaining_slot, remaining_ids, slots = (
             selection
         )
         if not remaining_ids:
-            derived = _remaining_from_question(
+            derived = _remaining_from_groups(
                 question, known_slot, known_id, tracker
             )
-            if derived[0] == "answer":
-                return answer_direct(derived[1], derived[2])
-            if derived[0] == "prompt":
-                remaining_ids = derived[1]
-            elif derived[0] == "unknown":
+            if derived is not None:
+                item, fail = derived
+                if item is not None:
+                    ranked, route, from_id, to_id = item
+                    payload = ranked_payload(
+                        ranked, route, from_id, to_id, ""
+                    )
+                    return selection_finish(payload)
+                resolved = {
+                    "id": known_id,
+                    "name": _stop_name(known_id) or "",
+                }
+                if fail[0] == "unknown":
+                    return selection_finish(
+                        _pick_payload(
+                            remaining_slot, [], resolved, _UNKNOWN_PLACE
+                        )
+                    )
+                if fail[0] == "truncated":
+                    _, slot, ids = fail
+                    return selection_finish(
+                        _pick_payload(
+                            slot, ids, resolved, _TRUNCATED_MESSAGE
+                        )
+                    )
                 return selection_finish(
-                    {"status": "refuse", "message": _UNKNOWN_PLACE}
+                    {"status": "refuse", "message": _NO_DIRECT}
                 )
-            else:
-                return selection_finish(
-                    {"status": "refuse", "message": _UNMATCHED_PICK}
-                )
+            return selection_finish(
+                {"status": "refuse", "message": _UNMATCHED_PICK}
+            )
         known_name = _stop_name(known_id) or ""
         stops = Stop.objects.filter(pk__in=remaining_ids).in_bulk()
         candidates = [
@@ -852,13 +1331,42 @@ def run_journey(*, question, history=(), context=None):
 
     def fallback():
         for route_id, (from_id, to_id) in tracker["findings"].items():
-            route = _verify_route(route_id, from_id, to_id)
+            route = _verify_route(route_id, from_id, to_id, tracker)
             if route is not None:
                 payload, _ = _answer_payload(
                     route, from_id, to_id, "", _meta(0, fallback=True)
                 )
                 return finish(payload, fallback=True)
         return finish({"status": "refuse", "message": _CANNOT_ANSWER}, fallback=True)
+
+    if selection[0] in ("none", "fresh"):
+        fresh = _fresh_matrix_answer(question, tracker)
+        if fresh is not None:
+            item, problem = fresh
+            if item is not None:
+                ranked, route, from_id, to_id = item
+                payload = ranked_payload(
+                    ranked, route, from_id, to_id, ""
+                )
+                return finish(payload)
+            if problem[0] == "unknown":
+                _, slot = problem
+                return finish(
+                    _pick_payload(slot, [], None, _UNKNOWN_PLACE)
+                )
+            if problem[0] == "truncated":
+                _, slot, ids = problem
+                return finish(
+                    _pick_payload(slot, ids, None, _TRUNCATED_MESSAGE)
+                )
+            if problem[0] == "zoom_in":
+                return finish(
+                    {
+                        "status": "refuse",
+                        "message": problem[1] or _UNKNOWN_PLACE,
+                    }
+                )
+            return finish({"status": "refuse", "message": _NO_DIRECT})
 
     try:
         draft = ""
@@ -901,7 +1409,7 @@ def run_journey(*, question, history=(), context=None):
                 pair = tracker["findings"].get(rid)
                 if pair is None:
                     return None
-                route = _verify_route(rid, pair[0], pair[1])
+                route = _verify_route(rid, pair[0], pair[1], tracker)
                 if route is None:
                     return None
                 verified.append((route, pair[0], pair[1]))

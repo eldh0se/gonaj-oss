@@ -271,8 +271,9 @@ class JourneyTests(ApiTestCase):
             ]
         )
         provider.complete_with_tools = stub
+        # Single-ended: the legacy model loop still verifies and repairs.
         body = self.ask(
-            {"question": "How do I get from Ernakulam South to Fort Kochi?"}
+            {"question": "Which buses serve Ernakulam South?"}
         ).json()
         self.assertEqual(body["status"], "refuse")
 
@@ -520,32 +521,17 @@ class DisambiguationTests(ApiTestCase):
     def ask(self, body):
         return self.client.post("/api/v1/journey/", body, format="json")
 
-    def test_ambiguous_name_returns_candidates_without_answer(self):
-        stub = StubModel(
-            script=[
-                _Response(
-                    _Message(
-                        tool_calls=[
-                            _ToolCall(
-                                "c1",
-                                "search_stops",
-                                json.dumps({"query": "North"}),
-                            )
-                        ]
-                    )
-                ),
-                _Response(_Message(content="Which stop did you mean?")),
-            ]
-        )
-        provider.complete_with_tools = stub
+    def test_ambiguous_origin_answers_via_matrix_without_pick(self):
+        # 012 FR-001/FR-006: ambiguous origin resolves group-first; the
+        # served member answers with no pick prompt.
+        provider.complete_with_tools = StubModel(script=[])
         body = self.ask({"question": "How do I get from North to South?"}).json()
-        self.assertEqual(body["status"], "disambiguate")
-        self.assertNotIn("routes", body)
-        names = {c["name"] for c in body["candidates"]}
-        self.assertEqual(names, {"North Hub", "North Edge"})
-        ids = {c["id"] for c in body["candidates"]}
-        self.assertEqual(ids, {self.north_hub.id, self.north_edge.id})
-        self.assertIn("which one", body["message"].lower())
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["boarding_stop"]["id"], self.north_hub.id)
+        self.assertEqual(body["alighting_stop"]["id"], self.south.id)
+        self.assertEqual(
+            body["routes"][0]["evidence"], f"/routes/{self.route.id}"
+        )
 
     def test_follow_up_for_chosen_stop_answers_honestly(self):
         stub = StubModel(
@@ -892,34 +878,9 @@ class SelectionTests(ApiTestCase):
         self.assertEqual(stub.calls, 0)
 
     def test_fresh_question_drops_stale_candidates(self):
-        stub = StubModel(
-            script=[
-                _Response(
-                    _Message(
-                        tool_calls=[
-                            _ToolCall(
-                                "c1",
-                                "find_routes",
-                                json.dumps(
-                                    {
-                                        "from_stop_id": self.aluva.id,
-                                        "to_stop_id": self.keast.id,
-                                    }
-                                ),
-                            )
-                        ]
-                    )
-                ),
-                _Response(
-                    _Message(
-                        content="Take the Aluva-East service from "
-                        "Aluva to Kaloor East, see "
-                        f"/routes/{self.route.id}."
-                    )
-                ),
-            ]
-        )
-        provider.complete_with_tools = stub
+        # 012: fresh from-to questions resolve groups-first with no model
+        # call, so stale selection context cannot leak anywhere.
+        provider.complete_with_tools = StubModel(script=[])
         body = self.ask(
             {
                 "question": "How do I get from Aluva to Kaloor East?",
@@ -932,47 +893,18 @@ class SelectionTests(ApiTestCase):
         ).json()
         self.assertEqual(body["status"], "ok")
         self.assertEqual(body["boarding_stop"]["name"], "Aluva")
-        sent = stub.received[0]
-        hints = [m["content"] for m in sent if m.get("role") == "system"]
-        self.assertFalse(any(str(self.kwest.id) in h for h in hints))
+        self.assertEqual(body["alighting_stop"]["id"], self.keast.id)
+        self.assertNotIn("Kaloor West", body["answer"])
 
-    def test_model_loop_disambiguation_carries_slot_and_offered_ids(self):
-        stub = StubModel(
-            script=[
-                _Response(
-                    _Message(
-                        tool_calls=[
-                            _ToolCall(
-                                "c1",
-                                "search_stops",
-                                json.dumps({"query": "Aluva North"}),
-                            )
-                        ]
-                    )
-                ),
-                _Response(
-                    _Message(
-                        tool_calls=[
-                            _ToolCall(
-                                "c2",
-                                "search_stops",
-                                json.dumps({"query": "Kaloor East"}),
-                            )
-                        ]
-                    )
-                ),
-                _Response(_Message(content="Which stop did you mean?")),
-            ]
-        )
-        provider.complete_with_tools = stub
+    def test_no_viable_pair_refuses_without_asking_first(self):
+        # 012 FR-005/clarify-C: every tested pair fails and the place
+        # matched, so the helper refuses instead of asking first.
+        provider.complete_with_tools = StubModel(script=[])
         body = self.ask(
             {"question": "How do I get from Aluva North to Kaloor East?"}
         ).json()
-        self.assertEqual(body["status"], "disambiguate")
-        self.assertEqual(body["slot"], "from")
-        self.assertEqual(body["offered_ids"], [self.a1.id, self.a2.id])
-        self.assertEqual(body["resolved"]["id"], self.keast.id)
-        self.assertTrue(all("detail" in c for c in body["candidates"]))
+        self.assertEqual(body["status"], "refuse")
+        self.assertIn("direct service", body["message"])
 
 
 class MapChoiceBackendTests(ApiTestCase):
@@ -994,6 +926,9 @@ class MapChoiceBackendTests(ApiTestCase):
         cls.south = f.make_stop(
             cls.import_run, 913, "Ernakulam South", 9.97, 76.28
         )
+        cls.dock = f.make_stop(
+            cls.import_run, 914, "Ernakulam South", 9.96, 76.27
+        )
 
     def setUp(self):
         super().setUp()
@@ -1004,37 +939,20 @@ class MapChoiceBackendTests(ApiTestCase):
         provider.complete_with_tools = self._real
 
     def test_disambiguate_candidates_carry_coordinates(self):
-        stub = StubModel(
-            script=[
-                _Response(
-                    _Message(
-                        tool_calls=[
-                            _ToolCall(
-                                "c1",
-                                "search_stops",
-                                json.dumps({"query": "North"}),
-                            )
-                        ]
-                    )
-                ),
-                _Response(
-                    _Message(
-                        tool_calls=[
-                            _ToolCall(
-                                "c2",
-                                "search_stops",
-                                json.dumps({"query": "Ernakulam South"}),
-                            )
-                        ]
-                    )
-                ),
-                _Response(_Message(content="Which stop did you mean?")),
-            ]
-        )
-        provider.complete_with_tools = stub
+        # 011 contract preserved under 012: candidate payloads produced by
+        # the partial-selection prompt still carry map-fit coordinates.
+        provider.complete_with_tools = StubModel(script=[])
         body = self.client.post(
             "/api/v1/journey/",
-            {"question": "How do I get from North to Ernakulam South?"},
+            {
+                "question": "North Hub",
+                "context": {
+                    "candidate_stop_ids": [self.hub.id, self.edge.id],
+                    "slot": "from",
+                    "selected_stop_id": self.hub.id,
+                    "slots": {"to_ids": [self.south.id, self.dock.id]},
+                },
+            },
             format="json",
         ).json()
         self.assertEqual(body["status"], "disambiguate")
