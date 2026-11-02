@@ -9,7 +9,7 @@
 Replace the incompatible OpenAI-SDK transcription call with a direct
 `httpx` HTTPS POST to `https://api.meta.ai/v1/asr/transcribe`
 carrying a `request` JSON part (`model`, `audioEncoding: WAV`, `mode:
-PUSH_TO_TALK`, `languageBias: ["English"]`, stop-name `keywords`) plus
+PUSH_TO_TALK`, `languageBias: ["english"]`, stop-name `keywords`) plus
 the `audio/wav` part, parsing `TranscribeResponse.transcript`.
 Encode dictated audio as WAV in the frontend; validate WAV at the
 backend with no transcode fallback. Update filename/MIME validation,

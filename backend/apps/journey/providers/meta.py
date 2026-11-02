@@ -103,7 +103,10 @@ def transcribe_audio(*, audio_bytes, filename="question.wav", keywords=()):
                             ),
                             "audioEncoding": "WAV",
                             "mode": "PUSH_TO_TALK",
-                            "languageBias": ["English"],
+                            # Lowercase like the reference CLI
+                            # (`--language-bias english`); the endpoint
+                            # rejected `"English"`.
+                            "languageBias": ["english"],
                             "keywords": list(keywords or []),
                         }
                     ),

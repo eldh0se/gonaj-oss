@@ -17,7 +17,7 @@ incompatible OpenAI-SDK `audio.transcriptions` shape.
 
 | Part | Content-Type | Meaning |
 |------|--------------|---------|
-| `request` | `application/json` | `{model: "muse-voice-transcribe-1.0", audioEncoding: "WAV", mode: "PUSH_TO_TALK", languageBias: ["English"], keywords: [<stop names>]}` |
+| `request` | `application/json` | `{model: "muse-voice-transcribe-1.0", audioEncoding: "WAV", mode: "PUSH_TO_TALK", languageBias: ["english"], keywords: [<stop names>]}` |
 | `audio` | `audio/wav` | Spoken question bytes: mono 16-bit PCM WAV at 16 or 24 kHz (24 kHz preferred), filename normalized to `*.wav` (WAV requirement; other rates get HTTP 503) |
 
 Headers: `Accept: application/json`, `Authorization: Bearer <server-side key>`. No `sessionId` is sent.

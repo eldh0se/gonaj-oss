@@ -28,7 +28,7 @@ implementation has no open choices.
 
 - **Decision**: `multipart/form-data` with a `request` JSON part
   `{model: "muse-voice-transcribe-1.0", audioEncoding: "WAV",
-  mode: "PUSH_TO_TALK", languageBias: ["English"], keywords: <stop list>}`
+  mode: "PUSH_TO_TALK", languageBias: ["english"], keywords: <stop list>}`
   plus the `audio` part (`audio/wav`), `Accept: application/json`,
   no `sessionId`; parse `TranscribeResponse.transcript` (empty
   transcript = failure, same as today).

@@ -144,7 +144,7 @@ class TranscribeWireTests(TestCase):
         self.assertEqual(metadata["model"], "muse-voice-transcribe-1.0")
         self.assertEqual(metadata["audioEncoding"], "WAV")
         self.assertEqual(metadata["mode"], "PUSH_TO_TALK")
-        self.assertEqual(metadata["languageBias"], ["English"])
+        self.assertEqual(metadata["languageBias"], ["english"])
         self.assertEqual(metadata["keywords"], ["Aluva", "Kaloor"])
         audio_part = kwargs["files"]["audio"]
         self.assertEqual(audio_part[0], "question.wav")

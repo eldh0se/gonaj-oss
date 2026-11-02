@@ -83,7 +83,7 @@ The Meta transcription service is unreachable or errors. The passenger still get
 - **FR-004**: The success contract MUST stay unchanged: 200 with `{transcript, meta: {model, provider, latency_ms}}`; the transcript lands in the editable field and only edited text is ever sent to the journey endpoint.
 - **FR-005**: Upstream timeout/connection errors MUST get at most one bounded retry, then the plain-language cannot-transcribe message (existing retry budget unchanged).
 - **FR-006**: Audio bytes, transcript text, and the model key MUST NOT be written to disk, database, or cache, MUST NOT appear in logs, and MUST NOT appear in frontend code — on success and on every failure path.
-- **FR-007**: The `request` JSON part MUST carry `languageBias: ["English"]` and `keywords: [...]` with the stop-name list capped at the existing 100-name vocabulary limit, so stop spellings survive dictation.
+- **FR-007**: The `request` JSON part MUST carry `languageBias: ["english"]` (lowercase, matching the reference client) and `keywords: [...]` with the stop-name list capped at the existing 100-name vocabulary limit, so stop spellings survive dictation.
 - **FR-008**: The Dictate UX MUST NOT change: press-and-hold recording, editable transcript field, and sending only the edited text to the journey question.
 - **FR-009**: The model key MUST stay server-side only, used exclusively through server-side HTTPS (direct `httpx` call; the SDK is not used for transcription).
 - **FR-010**: The request MUST send `Accept: application/json`; the backend MUST parse `TranscribeResponse.transcript`, and an empty transcript MUST return the plain 400, never presented as success.
@@ -106,6 +106,6 @@ The Meta transcription service is unreachable or errors. The passenger still get
 
 - The exact Meta endpoint path and WAV payload shape are confirmed against the provider docs during planning (the request states both are currently wrong).
 - The frontend encodes dictated audio as WAV (`question.wav`); there is deliberately no backend transcode fallback.
-- The `muse-voice-transcribe-1.0` model name stays; English bias is carried as `languageBias: ["English"]` in the `request` part.
+- The `muse-voice-transcribe-1.0` model name stays; English bias is carried as `languageBias: ["english"]` (lowercase) in the `request` part.
 - Model calls in tests stay stubbed at the `httpx` boundary; no live key or network is needed for the suite.
 - The 5 MB bound, 405/429 behavior, and throttle classes are reused as-is.
