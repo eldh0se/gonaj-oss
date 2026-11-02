@@ -11,7 +11,9 @@ plus the 006 endpoint-name annotations. Failures return
 ``search_places`` and ``find_routes_matrix`` are deterministic
 place-grouping helpers for direct use (no model registration).
 """
+import logging
 import math
+import re
 
 from django.db.models import Q
 
@@ -35,6 +37,11 @@ TOOL_SCHEMAS = {
             "bbox": {
                 "type": "string",
                 "description": "Closed bounds as min_lon,min_lat,max_lon,max_lat. Never combined with query.",
+            },
+            "exclude_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Stop ids to skip (rejected intent-check candidates).",
             },
         },
         "required": [],
@@ -66,9 +73,104 @@ TOOL_SCHEMAS = {
         "required": ["route_id"],
         "additionalProperties": False,
     },
+    "search_places": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Place-name fragment; one end of the journey question.",
+            },
+            "bbox": {
+                "type": "string",
+                "description": "Closed bounds min_lon,min_lat,max_lon,max_lat for a map-derived end. Never combined with query.",
+            },
+            "exclude_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Stop ids to skip (rejected intent-check candidates).",
+            },
+        },
+        "required": [],
+        "additionalProperties": False,
+    },
+    "find_routes_matrix": {
+        "type": "object",
+        "properties": {
+            "from_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Origin member stop ids (group members, nearest-end first).",
+            },
+            "to_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Destination member stop ids.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum pairs tested, nearest first. Defaults to the pair cap.",
+            },
+        },
+        "required": ["from_ids", "to_ids"],
+        "additionalProperties": False,
+    },
+    "distance_m": {
+        "type": "object",
+        "properties": {
+            "lat1": {"type": "number"},
+            "lon1": {"type": "number"},
+            "lat2": {"type": "number"},
+            "lon2": {"type": "number"},
+        },
+        "required": ["lat1", "lon1", "lat2", "lon2"],
+        "additionalProperties": False,
+    },
+    "nearby_stops": {
+        "type": "object",
+        "properties": {
+            "lat": {"type": "number"},
+            "lon": {"type": "number"},
+            "radius_m": {
+                "type": "number",
+                "description": "Search radius, default 500, maximum 2000.",
+            },
+        },
+        "required": ["lat", "lon"],
+        "additionalProperties": False,
+    },
 }
 
 RESULT_LIMIT = 100
+
+logger = logging.getLogger(__name__)
+
+
+def _log_out(name, out):
+    """One debug line per tool call: inputs are logged by the caller,
+    this summarizes the output (status, exact flag, hit counts, top-3
+    fallback labels with scores, truncation, or the error)."""
+    summary = f"ok={out.get('ok')} status={out.get('status')}"
+    if "exact" in out:
+        summary += f" exact={out['exact']}"
+    for key in ("stops", "groups", "pairs"):
+        items = out.get(key)
+        if isinstance(items, list):
+            summary += f" {key}={len(items)}"
+            if (
+                key in ("stops", "groups")
+                and out.get("exact") is False
+                and items
+            ):
+                top = [
+                    (item.get("label", item.get("name")), item.get("score"))
+                    for item in items[:3]
+                ]
+                summary += f" top3={top}"
+    if out.get("truncated") is not None:
+        summary += f" truncated={out.get('truncated')}"
+    if not out.get("ok"):
+        summary += f" error={str(out.get('error'))[:160]}"
+    logger.debug("journey tool %s -> %s", name, summary)
 
 
 def to_openai_tools():
@@ -90,6 +192,10 @@ _TOOL_DESCRIPTIONS = {
     "search_stops": "Find stops by name fragment or map area.",
     "find_routes": "Direct routes serving both stops in travelling order.",
     "get_route_detail": "One route with its ordered stops and evidence fields.",
+    "search_places": "Group same-named stops into places with members and route hints.",
+    "find_routes_matrix": "Direct routes for every origin/destination member pair.",
+    "distance_m": "Haversine meters between two points.",
+    "nearby_stops": "Stops around a point, nearest first.",
 }
 
 
@@ -101,6 +207,91 @@ def _stop_row(stop):
         "lat": stop.lat,
         "lon": stop.lon,
     }
+
+
+_TOKEN_SPLIT = re.compile(r"[^0-9a-z]+")
+
+
+def _query_tokens(text):
+    """Lowercase alphanumeric tokens of a search string."""
+    return [
+        token
+        for token in _TOKEN_SPLIT.split(str(text or "").lower())
+        if token
+    ]
+
+
+def _clean_exclude_ids(exclude_ids):
+    """Member ids to skip (rejected intent-check candidates)."""
+    cleaned = []
+    seen = set()
+    for value in exclude_ids or []:
+        try:
+            ivalue = int(value)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, bool) or ivalue < 1 or ivalue in seen:
+            continue
+        seen.add(ivalue)
+        cleaned.append(ivalue)
+    return cleaned
+
+
+def _phrase_bonus(stop, query_norm):
+    """Exact-phrase bonus: 1 when a candidate name appears in the query
+    (or vice versa), else 0. Checked over name and name_ml."""
+    for candidate in (
+        _normalized_place_name(getattr(stop, "name", None)),
+        _normalized_place_name(getattr(stop, "name_ml", None)),
+    ):
+        if candidate and (candidate in query_norm or query_norm in candidate):
+            return 1
+    return 0
+
+
+def _token_overlap_rows(text, exclude_ids=None):
+    """Stage-2 fallback: token-overlap rank over an icontains prefilter.
+
+    Runs only when Stage-1 icontains finds nothing. Prefilters stops
+    matching any query token (name or name_ml), ranks in Python by shared
+    token count desc, exact-phrase bonus, then fewer extra tokens, then
+    name, id, and caps at ``RESULT_LIMIT``. Excluded ids are skipped.
+    Each row carries its token scores (shared, extra, phrase/exact
+    bonus, score). SQLite-portable, no new dependencies.
+    """
+    wanted = set(_query_tokens(text))
+    if not wanted:
+        return []
+    query_norm = str(text or "").strip().casefold()
+    excluded = _clean_exclude_ids(exclude_ids)
+    token_filter = Q()
+    for token in wanted:
+        token_filter |= Q(name__icontains=token) | Q(
+            name_ml__icontains=token
+        )
+    queryset = Stop.objects.filter(token_filter)
+    if excluded:
+        queryset = queryset.exclude(pk__in=excluded)
+    scored = []
+    for stop in queryset.order_by("name", "id"):
+        candidate = set(_query_tokens(stop.name)) | set(
+            _query_tokens(stop.name_ml)
+        )
+        shared = len(wanted & candidate)
+        if not shared:
+            continue
+        extra = len(candidate - wanted)
+        bonus = _phrase_bonus(stop, query_norm)
+        score = shared * 1000 + bonus * 100 - extra
+        row = _stop_row(stop)
+        row["shared"] = shared
+        row["extra"] = extra
+        row["phrase_bonus"] = bonus
+        row["exact_bonus"] = bonus
+        row["score"] = score
+        scored.append((shared, bonus, extra, stop.name or "", stop.id, row))
+    scored.sort(key=lambda item: (-item[0], -item[1], item[2], item[3], item[4]))
+    return [item[5] for item in scored[:RESULT_LIMIT]]
 
 
 def _parse_bbox(bbox):
@@ -122,91 +313,142 @@ def _parse_bbox(bbox):
     return (min_lon, min_lat, max_lon, max_lat)
 
 
-def search_stops(query=None, bbox=None):
-    """Matching stops by name fragment or map area (read-only)."""
+def search_stops(query=None, bbox=None, exclude_ids=None):
+    """Matching stops by name fragment or map area (read-only).
+
+    Name search is two-stage: Stage-1 icontains returns ``exact`` True;
+    when it finds nothing, the token-overlap fallback ranks by shared
+    token count desc, exact-phrase bonus, then fewer extra tokens, then
+    name, id, and returns ``exact`` False plus per-stop token scores.
+    ``exclude_ids`` skips rejected intent-check candidates in both stages.
+    """
     has_query = query is not None and str(query).strip() != ""
     has_bbox = bbox is not None and str(bbox).strip() != ""
+    excluded = _clean_exclude_ids(exclude_ids)
+    logger.debug(
+        "journey tool search_stops has_query=%s has_bbox=%s excluded=%d",
+        has_query,
+        has_bbox,
+        len(excluded),
+    )
     if has_query and has_bbox:
-        return {
+        out = {
             "ok": False,
             "error": "Search by stop name or by map area, not both at once.",
         }
+        _log_out("search_stops", out)
+        return out
     if has_bbox:
         bounds = _parse_bbox(bbox)
         if bounds is None:
-            return {
+            out = {
                 "ok": False,
                 "error": "That map area does not look right. "
                 "Give four coordinates as "
                 "min_lon,min_lat,max_lon,max_lat.",
             }
+            _log_out("search_stops", out)
+            return out
         min_lon, min_lat, max_lon, max_lat = bounds
         if (
             max_lon - min_lon > MAX_BBOX_SPAN_DEGREES
             or max_lat - min_lat > MAX_BBOX_SPAN_DEGREES
         ):
-            return {
+            out = {
                 "ok": True,
                 "status": "zoom_in",
                 "stops": [],
+                "exact": True,
                 "detail": "That area is too large to list stops for. "
                 "Please zoom in and try again.",
             }
-        matches = (
-            Stop.objects.filter(
-                lon__gte=min_lon,
-                lon__lte=max_lon,
-                lat__gte=min_lat,
-                lat__lte=max_lat,
-            )
-            .order_by("name", "id")[:RESULT_LIMIT]
+            _log_out("search_stops", out)
+            return out
+        queryset = Stop.objects.filter(
+            lon__gte=min_lon,
+            lon__lte=max_lon,
+            lat__gte=min_lat,
+            lat__lte=max_lat,
         )
+        if excluded:
+            queryset = queryset.exclude(pk__in=excluded)
+        matches = queryset.order_by("name", "id")[:RESULT_LIMIT]
         rows = [_stop_row(s) for s in matches]
         if not rows:
-            return {"ok": True, "status": "empty", "stops": []}
-        return {"ok": True, "status": "ok", "stops": rows}
+            out = {"ok": True, "status": "empty", "stops": [], "exact": True}
+        else:
+            out = {"ok": True, "status": "ok", "stops": rows, "exact": True}
+        _log_out("search_stops", out)
+        return out
     if not has_query:
-        return {
+        out = {
             "ok": False,
             "error": "Give a stop name fragment or a map area to search.",
         }
+        _log_out("search_stops", out)
+        return out
     text = str(query).strip()
-    matches = (
-        Stop.objects.filter(
-            Q(name__icontains=text) | Q(name_ml__icontains=text)
-        )
-        .order_by("name", "id")[:RESULT_LIMIT]
+    queryset = Stop.objects.filter(
+        Q(name__icontains=text) | Q(name_ml__icontains=text)
     )
+    if excluded:
+        queryset = queryset.exclude(pk__in=excluded)
+    matches = queryset.order_by("name", "id")[:RESULT_LIMIT]
     rows = [_stop_row(s) for s in matches]
+    if rows:
+        logger.debug(
+            "journey tool search_stops stage=icontains hits=%d", len(rows)
+        )
+        out = {"ok": True, "status": "ok", "stops": rows, "exact": True}
+        _log_out("search_stops", out)
+        return out
+    logger.debug(
+        "journey tool search_stops stage=icontains hits=0 fallback=overlap"
+    )
+    rows = _token_overlap_rows(text, exclude_ids=excluded)
     if not rows:
-        return {"ok": True, "status": "empty", "stops": []}
-    return {"ok": True, "status": "ok", "stops": rows}
+        out = {"ok": True, "status": "empty", "stops": [], "exact": False}
+    else:
+        out = {"ok": True, "status": "ok", "stops": rows, "exact": False}
+    _log_out("search_stops", out)
+    return out
 
 
 def find_routes(from_stop_id, to_stop_id):
     """Direct routes serving both stops in travelling order."""
+    logger.debug(
+        "journey tool find_routes from_stop_id=%r to_stop_id=%r",
+        from_stop_id,
+        to_stop_id,
+    )
     try:
         from_id = int(from_stop_id)
         to_id = int(to_stop_id)
     except (TypeError, ValueError):
-        return {
+        out = {
             "ok": False,
             "error": "Give two stop ids to check for a direct service.",
         }
+        _log_out("find_routes", out)
+        return out
     if from_id < 1 or to_id < 1 or from_id == to_id:
-        return {
+        out = {
             "ok": False,
             "error": "Please choose two different stops to check. "
             "Pick an origin stop and a destination stop.",
         }
+        _log_out("find_routes", out)
+        return out
     if not Stop.objects.filter(pk=from_id).exists() or not Stop.objects.filter(
         pk=to_id
     ).exists():
-        return {
+        out = {
             "ok": False,
             "error": "I could not find one of those stops. "
             "Please check the names and try again.",
         }
+        _log_out("find_routes", out)
+        return out
     routes = list(
         order_routes(
             routes_with_endpoint_names(
@@ -217,7 +459,9 @@ def find_routes(from_stop_id, to_stop_id):
         ).distinct()
     )
     if not routes:
-        return {"ok": True, "routes": []}
+        out = {"ok": True, "routes": []}
+        _log_out("find_routes", out)
+        return out
     positions = {}
     for row in RouteStopMembership.objects.filter(
         route__in=[r.pk for r in routes],
@@ -240,18 +484,30 @@ def find_routes(from_stop_id, to_stop_id):
                     "evidence": f"/routes/{route.id}",
                 }
             )
-    return {"ok": True, "routes": direct}
+    logger.debug(
+        "journey tool find_routes from=%d to=%d candidates=%d direct=%d",
+        from_id,
+        to_id,
+        len(routes),
+        len(direct),
+    )
+    out = {"ok": True, "routes": direct}
+    _log_out("find_routes", out)
+    return out
 
 
 def get_route_detail(route_id):
     """One servable route with ordered stops and evidence fields."""
+    logger.debug("journey tool get_route_detail route_id=%r", route_id)
     try:
         wanted = int(route_id)
     except (TypeError, ValueError):
-        return {
+        out = {
             "ok": False,
             "error": "Give a route id to look up.",
         }
+        _log_out("get_route_detail", out)
+        return out
     try:
         route = (
             routes_with_endpoint_names(
@@ -261,11 +517,13 @@ def get_route_detail(route_id):
             .get(pk=wanted)
         )
     except (Route.DoesNotExist, Route.MultipleObjectsReturned, ValueError):
-        return {
+        out = {
             "ok": False,
             "error": "I could not find that route. "
             "Please check the link and try again.",
         }
+        _log_out("get_route_detail", out)
+        return out
     memberships = (
         RouteStopMembership.objects.filter(route=route)
         .select_related("stop")
@@ -273,7 +531,13 @@ def get_route_detail(route_id):
     )
     positions = [m.position for m in memberships]
     first, last = (min(positions), max(positions)) if positions else (None, None)
-    return {
+    logger.debug(
+        "journey tool get_route_detail route=%d name=%r stops=%d",
+        route.id,
+        route.name,
+        len(positions),
+    )
+    out = {
         "ok": True,
         "route": {
             "id": route.id,
@@ -294,6 +558,8 @@ def get_route_detail(route_id):
             ],
         },
     }
+    _log_out("get_route_detail", out)
+    return out
 
 
 EARTH_RADIUS_M = 6371000.0
@@ -408,72 +674,171 @@ def _place_group(normalized, index, members):
     }
 
 
-def search_places(query=None, bbox=None):
+def search_places(query=None, bbox=None, exclude_ids=None):
     """Group matching stops into places (read-only).
 
     Same exactly-one-of ``query``/``bbox`` and ``zoom_in``/``empty``
     semantics as :func:`search_stops`; at most ``RESULT_LIMIT`` stops
-    enter grouping.
+    enter grouping. Stage-1 icontains returns ``exact`` True; the
+    token-overlap fallback ranks by shared token count desc,
+    exact-phrase bonus, then fewer extra tokens, then name, id, returns
+    ``exact`` False plus per-group token scores, and orders groups by
+    their best member. ``exclude_ids`` skips rejected candidates.
     """
     has_query = query is not None and str(query).strip() != ""
     has_bbox = bbox is not None and str(bbox).strip() != ""
+    excluded = _clean_exclude_ids(exclude_ids)
+    logger.debug(
+        "journey tool search_places has_query=%s has_bbox=%s excluded=%d",
+        has_query,
+        has_bbox,
+        len(excluded),
+    )
     if has_query and has_bbox:
-        return {
+        out = {
             "ok": False,
             "error": "Search by stop name or by map area, not both at once.",
         }
+        _log_out("search_places", out)
+        return out
     if has_bbox:
         bounds = _parse_bbox(bbox)
         if bounds is None:
-            return {
+            out = {
                 "ok": False,
                 "error": "That map area does not look right. "
                 "Give four coordinates as "
                 "min_lon,min_lat,max_lon,max_lat.",
             }
+            _log_out("search_places", out)
+            return out
         min_lon, min_lat, max_lon, max_lat = bounds
         if (
             max_lon - min_lon > MAX_BBOX_SPAN_DEGREES
             or max_lat - min_lat > MAX_BBOX_SPAN_DEGREES
         ):
-            return {"ok": True, "status": "zoom_in", "groups": []}
-        matches = (
-            Stop.objects.filter(
-                lon__gte=min_lon,
-                lon__lte=max_lon,
-                lat__gte=min_lat,
-                lat__lte=max_lat,
-            )
-            .order_by("name", "id")[:RESULT_LIMIT]
+            out = {
+                "ok": True,
+                "status": "zoom_in",
+                "groups": [],
+                "exact": True,
+                "detail": "That area is too large to list stops for. "
+                "Please zoom in and try again.",
+            }
+            _log_out("search_places", out)
+            return out
+        queryset = Stop.objects.filter(
+            lon__gte=min_lon,
+            lon__lte=max_lon,
+            lat__gte=min_lat,
+            lat__lte=max_lat,
         )
-    elif has_query:
-        text = str(query).strip()
-        matches = (
-            Stop.objects.filter(
-                Q(name__icontains=text) | Q(name_ml__icontains=text)
-            )
-            .exclude(name__isnull=True)
-            .exclude(name__exact="")
-            .order_by("name", "id")[:RESULT_LIMIT]
-        )
-    else:
-        return {
+        if excluded:
+            queryset = queryset.exclude(pk__in=excluded)
+        matches = queryset.order_by("name", "id")[:RESULT_LIMIT]
+        rows = [_stop_row(stop) for stop in matches]
+        if not rows:
+            out = {
+                "ok": True,
+                "status": "empty",
+                "groups": [],
+                "exact": True,
+            }
+            _log_out("search_places", out)
+            return out
+        buckets = {}
+        for row in rows:
+            buckets.setdefault(_normalized_place_name(row["name"]), []).append(row)
+        groups = []
+        for normalized in sorted(buckets):
+            for index, cluster in enumerate(
+                _cluster_rows(buckets[normalized]), start=1
+            ):
+                groups.append(_place_group(normalized, index, cluster))
+        out = {"ok": True, "status": "ok", "groups": groups, "exact": True}
+        _log_out("search_places", out)
+        return out
+    if not has_query:
+        out = {
             "ok": False,
             "error": "Give a stop name fragment or a map area to search.",
         }
+        _log_out("search_places", out)
+        return out
+    text = str(query).strip()
+    queryset = (
+        Stop.objects.filter(
+            Q(name__icontains=text) | Q(name_ml__icontains=text)
+        )
+        .exclude(name__isnull=True)
+        .exclude(name__exact="")
+    )
+    if excluded:
+        queryset = queryset.exclude(pk__in=excluded)
+    matches = queryset.order_by("name", "id")[:RESULT_LIMIT]
     rows = [_stop_row(stop) for stop in matches]
+    if rows:
+        buckets = {}
+        for row in rows:
+            buckets.setdefault(_normalized_place_name(row["name"]), []).append(row)
+        groups = []
+        for normalized in sorted(buckets):
+            for index, cluster in enumerate(
+                _cluster_rows(buckets[normalized]), start=1
+            ):
+                groups.append(_place_group(normalized, index, cluster))
+        logger.debug(
+            "journey tool search_places stage=icontains groups=%d labels=%s",
+            len(groups),
+            [g["label"] for g in groups[:5]],
+        )
+        out = {"ok": True, "status": "ok", "groups": groups, "exact": True}
+        _log_out("search_places", out)
+        return out
+    logger.debug("journey tool search_places stage=icontains hits=0 fallback=overlap")
+    rows = _token_overlap_rows(text, exclude_ids=excluded)
     if not rows:
-        return {"ok": True, "status": "empty", "groups": []}
+        out = {"ok": True, "status": "empty", "groups": [], "exact": False}
+        _log_out("search_places", out)
+        return out
     buckets = {}
     for row in rows:
         buckets.setdefault(_normalized_place_name(row["name"]), []).append(row)
-    groups = []
-    for normalized in sorted(buckets):
+    ranked = []
+    for normalized in buckets:
         for index, cluster in enumerate(
             _cluster_rows(buckets[normalized]), start=1
         ):
-            groups.append(_place_group(normalized, index, cluster))
-    return {"ok": True, "status": "ok", "groups": groups}
+            group = _place_group(normalized, index, cluster)
+            best = min(
+                cluster,
+                key=lambda m: (
+                    -m.get("shared", 0),
+                    -m.get("phrase_bonus", m.get("exact_bonus", 0)),
+                    m.get("extra", 0),
+                    m.get("name") or "",
+                    m.get("id"),
+                ),
+            )
+            bonus = best.get("phrase_bonus", best.get("exact_bonus", 0))
+            group["shared"] = best.get("shared", 0)
+            group["extra"] = best.get("extra", 0)
+            group["phrase_bonus"] = bonus
+            group["exact_bonus"] = bonus
+            group["score"] = best.get("score", 0)
+            ranked.append(group)
+    ranked.sort(
+        key=lambda g: (
+            -g.get("shared", 0),
+            -g.get("phrase_bonus", g.get("exact_bonus", 0)),
+            g.get("extra", 0),
+            g.get("label") or "",
+            g.get("key") or "",
+        )
+    )
+    out = {"ok": True, "status": "ok", "groups": ranked, "exact": False}
+    _log_out("search_places", out)
+    return out
 
 
 def _direct_pair_routes(from_stop_id, to_stop_id):
@@ -514,49 +879,237 @@ def _direct_pair_routes(from_stop_id, to_stop_id):
     return direct
 
 
-def find_routes_matrix(from_ids, to_ids):
-    """Direct routes for every ordered pair (read-only).
+MATRIX_PAIR_CAP = 200
+
+
+def find_routes_matrix(from_ids, to_ids, limit=MATRIX_PAIR_CAP):
+    """Direct routes for ordered pairs, nearest first (read-only).
 
     Equal-id pairs are skipped; unknown ids error like
     :func:`find_routes`. Only pairs with at least one travelling-order
-    direct route appear, so opposite-direction pairs drop out.
+    direct route appear, so opposite-direction pairs drop out. Pairs are
+    tested in ascending minimum member-to-member haversine order and at
+    most ``limit`` pairs are tested; ``truncated`` reports whether pairs
+    went untested, with their destination ids in ``untested_to_ids``.
     """
     try:
         sources = [int(value) for value in (from_ids or [])]
         targets = [int(value) for value in (to_ids or [])]
     except (TypeError, ValueError):
-        return {
+        out = {
             "ok": False,
             "error": "Give stop id lists to check for direct services.",
         }
+        _log_out("find_routes_matrix", out)
+        return out
+    logger.debug(
+        "journey tool find_routes_matrix from=%d to=%d limit=%r",
+        len(sources),
+        len(targets),
+        limit,
+    )
     if any(value < 1 for value in sources + targets):
-        return {
+        out = {
             "ok": False,
             "error": "Stop ids must be positive integers.",
         }
-    known = set(
-        Stop.objects.filter(pk__in=set(sources) | set(targets)).values_list(
-            "pk", flat=True
-        )
-    )
+        _log_out("find_routes_matrix", out)
+        return out
+    try:
+        cap = int(limit)
+    except (TypeError, ValueError):
+        out = {
+            "ok": False,
+            "error": "Give a positive pair limit.",
+        }
+        _log_out("find_routes_matrix", out)
+        return out
+    if cap < 1:
+        out = {
+            "ok": False,
+            "error": "Give a positive pair limit.",
+        }
+        _log_out("find_routes_matrix", out)
+        return out
+    known = {
+        row["id"]: (row["lat"], row["lon"])
+        for row in Stop.objects.filter(
+            pk__in=set(sources) | set(targets)
+        ).values("id", "lat", "lon")
+    }
     if len(known) != len(set(sources) | set(targets)):
-        return {
+        out = {
             "ok": False,
             "error": "I could not find one of those stops. "
             "Please check the names and try again.",
         }
-    pairs = []
+        _log_out("find_routes_matrix", out)
+        return out
+    ordered = []
     for from_id in sources:
         for to_id in targets:
             if from_id == to_id:
                 continue
-            routes = _direct_pair_routes(from_id, to_id)
-            if routes:
-                pairs.append(
-                    {
-                        "from_stop_id": from_id,
-                        "to_stop_id": to_id,
-                        "routes": routes,
-                    }
-                )
-    return {"ok": True, "pairs": pairs}
+            from_lat, from_lon = known[from_id]
+            to_lat, to_lon = known[to_id]
+            coords = (from_lat, from_lon, to_lat, to_lon)
+            if any(value is None for value in coords):
+                gap = float("inf")
+            else:
+                gap = _haversine_m(from_lat, from_lon, to_lat, to_lon)
+            ordered.append((gap, from_id, to_id))
+    ordered.sort(key=lambda item: (item[0], item[1], item[2]))
+    tested = ordered[:cap]
+    untested = ordered[cap:]
+    pairs = []
+    for _, from_id, to_id in tested:
+        routes = _direct_pair_routes(from_id, to_id)
+        if routes:
+            pairs.append(
+                {
+                    "from_stop_id": from_id,
+                    "to_stop_id": to_id,
+                    "routes": routes,
+                }
+            )
+    untested_from_ids = []
+    untested_to_ids = []
+    for _, from_id, to_id in untested:
+        if from_id not in untested_from_ids:
+            untested_from_ids.append(from_id)
+        if to_id not in untested_to_ids:
+            untested_to_ids.append(to_id)
+    logger.debug(
+        "journey tool find_routes_matrix tested=%d viable=%d truncated=%s",
+        len(tested),
+        len(pairs),
+        bool(untested),
+    )
+    out = {
+        "ok": True,
+        "pairs": pairs,
+        "truncated": bool(untested),
+        "untested_from_ids": untested_from_ids,
+        "untested_to_ids": untested_to_ids,
+    }
+    _log_out("find_routes_matrix", out)
+    return out
+
+
+def _is_finite_number(value):
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def distance_m(lat1, lon1, lat2, lon2):
+    """Haversine meters between two points (read-only, SQLite-portable)."""
+    coords = (lat1, lon1, lat2, lon2)
+    if not all(_is_finite_number(value) for value in coords):
+        out = {
+            "ok": False,
+            "error": "Give four numbers as lat1, lon1, lat2, lon2.",
+        }
+        _log_out("distance_m", out)
+        return out
+    if not (
+        -90 <= lat1 <= 90
+        and -90 <= lat2 <= 90
+        and -180 <= lon1 <= 180
+        and -180 <= lon2 <= 180
+    ):
+        out = {
+            "ok": False,
+            "error": "Latitudes stay within -90 to 90, "
+            "longitudes within -180 to 180.",
+        }
+        _log_out("distance_m", out)
+        return out
+    out = {
+        "ok": True,
+        "distance_m": _haversine_m(
+            float(lat1), float(lon1), float(lat2), float(lon2)
+        ),
+    }
+    logger.debug(
+        "journey tool distance_m (%.4f,%.4f)->(%.4f,%.4f) = %.1fm",
+        float(lat1),
+        float(lon1),
+        float(lat2),
+        float(lon2),
+        out["distance_m"],
+    )
+    return out
+
+
+NEARBY_STOPS_DEFAULT_RADIUS_M = 500.0
+NEARBY_STOPS_MAX_RADIUS_M = 2000.0
+
+
+def nearby_stops(lat, lon, radius_m=NEARBY_STOPS_DEFAULT_RADIUS_M):
+    """Stops around a point, nearest first (read-only, SQLite-portable).
+
+    DB bbox prefilter plus pure-Python haversine filtering; at most
+    ``RESULT_LIMIT`` stops, ordered by ascending ``distance_m``.
+    """
+    logger.debug("journey tool nearby_stops radius_m=%r", radius_m)
+    if not _is_finite_number(lat) or not _is_finite_number(lon):
+        out = {
+            "ok": False,
+            "error": "Give numbers for lat and lon.",
+        }
+        _log_out("nearby_stops", out)
+        return out
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        out = {
+            "ok": False,
+            "error": "Latitudes stay within -90 to 90, "
+            "longitudes within -180 to 180.",
+        }
+        _log_out("nearby_stops", out)
+        return out
+    if not _is_finite_number(radius_m) or not (
+        0 < radius_m <= NEARBY_STOPS_MAX_RADIUS_M
+    ):
+        out = {
+            "ok": False,
+            "error": "Search within 0 to 2000 meters of the point.",
+        }
+        _log_out("nearby_stops", out)
+        return out
+    half_lat = radius_m / 111320.0
+    half_lon = radius_m / (
+        111320.0 * max(math.cos(math.radians(lat)), 1e-6)
+    )
+    rows = [
+        _stop_row(stop)
+        for stop in Stop.objects.filter(
+            lat__gte=lat - half_lat,
+            lat__lte=lat + half_lat,
+            lon__gte=lon - half_lon,
+            lon__lte=lon + half_lon,
+        ).order_by("name", "id")
+    ]
+    measured = []
+    for row in rows:
+        gap = _haversine_m(lat, lon, row["lat"], row["lon"])
+        if gap <= radius_m:
+            measured.append((gap, row))
+    measured.sort(key=lambda item: (item[0], item[1]["id"]))
+    out = {
+        "ok": True,
+        "stops": [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "lat": row["lat"],
+                "lon": row["lon"],
+                "distance_m": gap,
+            }
+            for gap, row in measured[:RESULT_LIMIT]
+        ],
+    }
+    _log_out("nearby_stops", out)
+    return out
