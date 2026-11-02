@@ -23,14 +23,6 @@ MAX_TOOL_TURNS = 4
 MAX_RESOLVE_ATTEMPTS = 3
 
 
-def _short(text, limit=1000):
-    """Truncate model content for debug logs without losing the decision."""
-    text = text or ""
-    if len(text) > limit:
-        return text[:limit] + f"...[truncated {len(text) - limit} chars]"
-    return text
-
-
 _JOURNEY_LOG_LOGGERS = ("apps.journey.agent", "apps.journey.tools")
 
 _active_request_log_buffer = None
@@ -685,7 +677,11 @@ def _validate_tool_args(name, args):
 def execute_tool(name, args, tracker):
     """Run one model-requested tool call, recording it for the audit log."""
     tracker["tools_used"].append(name)
-    logger.debug("journey agent model requested tool %s args=%r", name, args)
+    logger.debug(
+        "journey agent model requested tool %s arg_keys=%s",
+        name,
+        sorted(args) if isinstance(args, dict) else [],
+    )
     validated = _validate_tool_args(name, args) if name in _TOOL_FUNCTIONS else None
     if validated is None:
         logger.debug("journey agent tool %s rejected by validator", name)
@@ -748,11 +744,7 @@ def _model_turn(messages):
         getattr(getattr(call, "function", None), "name", "?")
         for call in getattr(message, "tool_calls", None) or []
     ]
-    logger.debug(
-        "journey agent model thinking=%r tool_calls=%s",
-        _short(getattr(message, "content", None)),
-        calls,
-    )
+    logger.debug("journey agent model tool_calls=%s", calls)
     return message
 
 
@@ -838,7 +830,11 @@ WALK_MATE_RADIUS_M = 150.0
 
 def _direct_tool(name, args, tracker):
     """Call a tool outside the model loop, still recording audit trail."""
-    logger.debug("journey agent direct tool %s args=%r", name, args)
+    logger.debug(
+        "journey agent direct tool %s arg_keys=%s",
+        name,
+        sorted(args) if isinstance(args, dict) else [],
+    )
     tracker["tools_used"].append(name)
     try:
         result = _TOOL_FUNCTIONS[name](**args)
@@ -903,25 +899,22 @@ def _resolve_end(text, tracker, exclude_ids=None):
     if exclude_ids:
         args["exclude_ids"] = list(exclude_ids)
     logger.debug(
-        "journey agent resolve end=%r excluded=%s", text, list(exclude_ids or [])
+        "journey agent resolve excluded=%s", list(exclude_ids or [])
     )
     result = _direct_tool("search_places", args, tracker)
     if not result.get("ok"):
-        logger.debug("journey agent resolve end=%r decision=error", text)
+        logger.debug("journey agent resolve decision=error")
         return None, ("empty",), False
     if result.get("status") == "zoom_in":
-        logger.debug("journey agent resolve end=%r decision=zoom_in", text)
+        logger.debug("journey agent resolve decision=zoom_in")
         return None, ("zoom_in", result.get("detail") or ""), True
     groups = result.get("groups", [])
     exact = result.get("exact", True)
     if not groups:
-        logger.debug(
-            "journey agent resolve end=%r decision=empty exact=%s", text, exact
-        )
+        logger.debug("journey agent resolve decision=empty exact=%s", exact)
         return None, ("empty",), exact
     logger.debug(
-        "journey agent resolve end=%r decision=resolved exact=%s groups=%d labels=%s",
-        text,
+        "journey agent resolve decision=resolved exact=%s groups=%d labels=%s",
         exact,
         len(groups),
         [g.get("label") for g in groups[:5]],
@@ -983,8 +976,7 @@ def _intent_check_groups(end_text, groups, tracker):
         {"role": "user", "content": prompt},
     ]
     logger.debug(
-        "journey agent intent-check end=%r top5=%s",
-        end_text,
+        "journey agent intent-check top5=%s",
         [
             (g.get("label"), g.get("score"), g.get("shared"))
             for g in top
@@ -993,10 +985,7 @@ def _intent_check_groups(end_text, groups, tracker):
     try:
         message = _model_turn(messages)
     except Exception:
-        logger.debug(
-            "journey agent intent-check end=%r decision=keep-all(model-error)",
-            end_text,
-        )
+        logger.debug("journey agent intent-check decision=keep-all(model-error)")
         return sorted(member_ids), []
     content = getattr(message, "content", None) or ""
     listed = [
@@ -1014,9 +1003,7 @@ def _intent_check_groups(end_text, groups, tracker):
         kept = sorted(member_ids)
     dropped = sorted(member_ids - set(kept))
     logger.debug(
-        "journey agent intent-check end=%r reply=%r decision=keep ids=%s drop ids=%s",
-        end_text,
-        _short(content),
+        "journey agent intent-check decision=keep ids=%s drop ids=%s",
         kept,
         dropped,
     )
@@ -1040,8 +1027,7 @@ def _resolve_with_retry(text, tracker, max_attempts=MAX_RESOLVE_ATTEMPTS):
     last_exact = False
     for attempt in range(1, max_attempts + 1):
         logger.debug(
-            "journey agent retry end=%r attempt=%d/%d excluded=%s",
-            text,
+            "journey agent retry attempt=%d/%d excluded=%s",
             attempt,
             max_attempts,
             excluded,
@@ -1051,16 +1037,14 @@ def _resolve_with_retry(text, tracker, max_attempts=MAX_RESOLVE_ATTEMPTS):
         )
         if problem is not None:
             logger.debug(
-                "journey agent retry end=%r attempt=%d decision=stop problem=%s",
-                text,
+                "journey agent retry attempt=%d decision=stop problem=%s",
                 attempt,
                 problem[0],
             )
             return groups, problem, exact, excluded
         if exact:
             logger.debug(
-                "journey agent retry end=%r attempt=%d decision=exact-match",
-                text,
+                "journey agent retry attempt=%d decision=exact-match",
                 attempt,
             )
             return groups, None, True, excluded
@@ -1068,16 +1052,14 @@ def _resolve_with_retry(text, tracker, max_attempts=MAX_RESOLVE_ATTEMPTS):
         kept, dropped = _intent_check_groups(text, groups, tracker)
         if set(kept) >= set(_member_ids(groups)):
             logger.debug(
-                "journey agent retry end=%r attempt=%d decision=allowlist-kept-all",
-                text,
+                "journey agent retry attempt=%d decision=allowlist-kept-all",
                 attempt,
             )
             return groups, None, False, excluded
         fresh = [rid for rid in dropped if rid not in excluded_set]
         if not fresh:
             logger.debug(
-                "journey agent retry end=%r attempt=%d decision=allowlist-no-new-drops stop",
-                text,
+                "journey agent retry attempt=%d decision=allowlist-no-new-drops stop",
                 attempt,
             )
             return groups, ("rejected",), False, excluded
@@ -1086,8 +1068,7 @@ def _resolve_with_retry(text, tracker, max_attempts=MAX_RESOLVE_ATTEMPTS):
     if last_groups is None:
         return None, ("empty",), False, excluded
     logger.debug(
-        "journey agent retry end=%r decision=attempts-exhausted excluded=%s",
-        text,
+        "journey agent retry decision=attempts-exhausted excluded=%s",
         excluded,
     )
     return last_groups, ("rejected",), last_exact, excluded
@@ -1462,8 +1443,8 @@ def run_journey(*, question, history=(), context=None):
 
     tracker = {"tools_used": [], "calls": [], "findings": {}, "searches": []}
     logger.debug(
-        "journey agent question=%r history_turns=%d context_keys=%s candidate_ids=%s",
-        question.strip()[:300],
+        "journey agent question_len=%d history_turns=%d context_keys=%s candidate_ids=%s",
+        len(question.strip()),
         len(history or []),
         sorted(context.keys()),
         candidate_ids,
@@ -1752,9 +1733,8 @@ def run_journey(*, question, history=(), context=None):
             if not entry["tool_calls"]:
                 draft = entry["content"] or ""
                 logger.debug(
-                    "journey agent model-loop turn=%d decision=draft draft=%r",
+                    "journey agent model-loop turn=%d decision=draft",
                     turn,
-                    _short(draft),
                 )
                 break
             logger.debug(
@@ -1793,8 +1773,7 @@ def run_journey(*, question, history=(), context=None):
         def verified_answer(text):
             if _forbidden(text):
                 logger.debug(
-                    "journey agent verified-answer decision=reject reason=forbidden-shaped draft=%r",
-                    _short(text),
+                    "journey agent verified-answer decision=reject reason=forbidden-shaped"
                 )
                 return None
             verified = []
@@ -1847,9 +1826,7 @@ def run_journey(*, question, history=(), context=None):
             try:
                 repair = _model_turn(messages)
                 draft = getattr(repair, "content", None) or ""
-                logger.debug(
-                    "journey agent model-loop repair draft=%r", _short(draft)
-                )
+                logger.debug("journey agent model-loop decision=repair-draft")
             except Exception:
                 return fallback()
             cited = []

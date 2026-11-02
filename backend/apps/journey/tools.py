@@ -326,10 +326,10 @@ def search_stops(query=None, bbox=None, exclude_ids=None):
     has_bbox = bbox is not None and str(bbox).strip() != ""
     excluded = _clean_exclude_ids(exclude_ids)
     logger.debug(
-        "journey tool search_stops query=%r bbox=%r excluded=%s",
-        str(query).strip() if has_query else None,
-        str(bbox).strip() if has_bbox else None,
-        excluded or [],
+        "journey tool search_stops has_query=%s has_bbox=%s excluded=%d",
+        has_query,
+        has_bbox,
+        len(excluded),
     )
     if has_query and has_bbox:
         out = {
@@ -689,10 +689,10 @@ def search_places(query=None, bbox=None, exclude_ids=None):
     has_bbox = bbox is not None and str(bbox).strip() != ""
     excluded = _clean_exclude_ids(exclude_ids)
     logger.debug(
-        "journey tool search_places query=%r bbox=%r excluded=%s",
-        str(query).strip() if has_query else None,
-        str(bbox).strip() if has_bbox else None,
-        excluded or [],
+        "journey tool search_places has_query=%s has_bbox=%s excluded=%d",
+        has_query,
+        has_bbox,
+        len(excluded),
     )
     if has_query and has_bbox:
         out = {
@@ -1054,9 +1054,7 @@ def nearby_stops(lat, lon, radius_m=NEARBY_STOPS_DEFAULT_RADIUS_M):
     DB bbox prefilter plus pure-Python haversine filtering; at most
     ``RESULT_LIMIT`` stops, ordered by ascending ``distance_m``.
     """
-    logger.debug(
-        "journey tool nearby_stops lat=%r lon=%r radius_m=%r", lat, lon, radius_m
-    )
+    logger.debug("journey tool nearby_stops radius_m=%r", radius_m)
     if not _is_finite_number(lat) or not _is_finite_number(lon):
         out = {
             "ok": False,
