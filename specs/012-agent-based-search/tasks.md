@@ -130,6 +130,12 @@ repo convention is factory + stubbed-provider journey tests written first.
 
 ---
 
+## Phase 7: Convergence
+
+- [X] T033 Scope the FR-001 bbox sentence and FR-012 zoom_in branch to the model loop (docs-only; deterministic flow sends `query` text) so spec matches the implemented code per FR-001, FR-012; wire `bbox` ends in the next feature
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

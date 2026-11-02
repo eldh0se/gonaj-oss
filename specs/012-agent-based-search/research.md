@@ -162,6 +162,9 @@ feature's dev-notes (`dev-notes/agent_loop.md`, `dev-notes/agent_tools.md`,
 
 ## Deferred (out of scope, noted for the next feature)
 
+- Map-area (`bbox`) ends in the deterministic flow: `bbox` exists in
+  `TOOL_SCHEMAS` and the validator for model-loop use; wiring `bbox` ends
+  with relevance paging into the group-first flow is the next feature.
 - Location variant (loop Step 1b: origin ids from `nearby_stops` instead of
   `search_places` query): `nearby_stops` is created now; its consumption is
   the next feature. `FR-001` forbids live location overriding a named end.
