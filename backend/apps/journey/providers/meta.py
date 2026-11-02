@@ -75,17 +75,19 @@ def complete_with_tools(*, model, messages, tools):
     )
 
 
-def transcribe_audio(*, audio_bytes, filename="question.wav", keywords=()):
+def transcribe_audio(*, audio_bytes, filename="question.wav"):
     """Transcribe journey audio via the Meta ASR endpoint.
 
     Direct HTTPS POST (multipart ``request`` JSON part plus the
-    ``audio/wav`` part). Returns the transcript text (possibly empty —
+    audio part). Returns the transcript text (possibly empty —
     the view turns that into the plain cannot-transcribe message).
     Raises on transport errors (after one transient retry) and
     non-200 responses; the view converts those to the same plain
     message. The audio bytes are used for this call only; nothing is
-    stored. ``keywords`` carries vocabulary biasing (stop names) so
-    dictation preserves stop spellings.
+    stored. No ``keywords`` are sent: the endpoint rejects arbitrary
+    stop-name content (e.g. a business stop name) with a 400 that
+    fails the whole transcription, and the bias covers only a small
+    alphabetical slice of stops anyway.
     """
 
     def call():
@@ -107,7 +109,6 @@ def transcribe_audio(*, audio_bytes, filename="question.wav", keywords=()):
                             # (`--language-bias english`); the endpoint
                             # rejected `"English"`.
                             "languageBias": ["english"],
-                            "keywords": list(keywords or []),
                         }
                     ),
                     "application/json",

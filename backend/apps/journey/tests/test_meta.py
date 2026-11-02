@@ -132,7 +132,6 @@ class TranscribeWireTests(TestCase):
             text = provider.transcribe_audio(
                 filename="question.wav",
                 audio_bytes=body,
-                keywords=["Aluva", "Kaloor"],
             )
         self.assertEqual(text, "hello")
         self.assertEqual(post.call_count, 1)
@@ -145,7 +144,10 @@ class TranscribeWireTests(TestCase):
         self.assertEqual(metadata["audioEncoding"], "WAV")
         self.assertEqual(metadata["mode"], "PUSH_TO_TALK")
         self.assertEqual(metadata["languageBias"], ["english"])
-        self.assertEqual(metadata["keywords"], ["Aluva", "Kaloor"])
+        # No `keywords` key: the endpoint 400s arbitrary stop-name
+        # content (e.g. "Aarow Global Business Solutions"), failing
+        # the whole transcription.
+        self.assertNotIn("keywords", metadata)
         audio_part = kwargs["files"]["audio"]
         self.assertEqual(audio_part[0], "question.wav")
         self.assertEqual(audio_part[1], body)
@@ -172,7 +174,6 @@ class TranscribeWireTests(TestCase):
                 provider.transcribe_audio(
                     filename="question.wav",
                     audio_bytes=_wav_bytes(),
-                    keywords=[],
                 ),
                 "hi",
             )
@@ -193,7 +194,6 @@ class TranscribeWireTests(TestCase):
                 provider.transcribe_audio(
                     filename="question.wav",
                     audio_bytes=_wav_bytes(),
-                    keywords=[],
                 ),
                 "",
             )
@@ -212,7 +212,6 @@ class TranscribeWireTests(TestCase):
                 provider.transcribe_audio(
                     filename="question.wav",
                     audio_bytes=_wav_bytes(),
-                    keywords=[],
                 )
         self.assertEqual(post.call_count, 2)
 
@@ -236,7 +235,6 @@ class TranscribeWireTests(TestCase):
                 provider.transcribe_audio(
                     filename="question.wav",
                     audio_bytes=_wav_bytes(),
-                    keywords=[],
                 ),
                 "ok",
             )
@@ -256,7 +254,6 @@ class TranscribeWireTests(TestCase):
                 provider.transcribe_audio(
                     filename="question.wav",
                     audio_bytes=_wav_bytes(),
-                    keywords=[],
                 )
         self.assertEqual(post.call_count, 1)
 

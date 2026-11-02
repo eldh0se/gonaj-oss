@@ -9,7 +9,7 @@
 Replace the incompatible OpenAI-SDK transcription call with a direct
 `httpx` HTTPS POST to `https://api.meta.ai/v1/asr/transcribe`
 carrying a `request` JSON part (`model`, `audioEncoding: WAV`, `mode:
-PUSH_TO_TALK`, `languageBias: ["english"]`, stop-name `keywords`) plus
+PUSH_TO_TALK`, `languageBias: ["english"]` and no `keywords` (biasing removed after live probing) plus
 the `audio/wav` part, parsing `TranscribeResponse.transcript`.
 Encode dictated audio as WAV in the frontend; validate WAV at the
 backend with no transcode fallback. Update filename/MIME validation,
@@ -38,7 +38,7 @@ transient shapes, [contracts/](./contracts/) for the wire contract,
 
 **Constraints**: Read-only product (no dataset writes); plain-language errors only (never leak key, upstream detail, audio, or transcripts); 5 MB bound enforced on the upload before any model call; filename normalized to `*.wav` with `audio/wav` validation of mono 16-bit PCM at 16 or 24 kHz (24 kHz preferred; non-WAV rejected plainly, no transcode path); client-side encode failure shows the plain cannot-transcribe notice with typed-input fallback and no upload; `sessionId` omitted from the wire call; response `meta` (model, provider, latency) audit preserved (transcribe has no `tools_used`); tests stub at the `httpx` boundary with no live network
 
-**Scale/Scope**: One endpoint's wire call plus an additive frontend encoder; ≤100 stop-name keywords reused from `_stop_vocabulary`
+**Scale/Scope**: One endpoint's wire call plus an additive frontend encoder; no `keywords` (vocabulary biasing removed — the endpoint 400s arbitrary stop-name content)
 
 ## Constitution Check
 
@@ -48,7 +48,7 @@ transient shapes, [contracts/](./contracts/) for the wire contract,
 - **II. Read-only product** — PASS: transcription reads audio transiently; no dataset mutation, no admin changes, no crowdsourcing mechanics; audio discarded same-request.
 - **III. No accounts / minimal data** — PASS: no identity or tracking; audio never stored; logs carry no audio, transcript, or key (sweep-tested).
 - **IV. Monorepo separation** — PASS: `backend/` provider fix plus additive WAV encode in the existing dictate component; public API shape unchanged; no cross-boundary internals.
-- **V. App-owned GTFS-inspired data + provenance** — PASS: reads existing stop names for keyword bias only; no OSM-live queries; provenance untouched.
+- **V. App-owned GTFS-inspired data + provenance** — PASS: transcription reads no stop names (keyword bias removed); no OSM-live queries; provenance untouched.
 - **VI. Simple synchronous stack** — PASS: plain Python + Django; `httpx` is a synchronous HTTP client, not a new service, queue, or routing engine; no transcode binary — WAV validation only.
 - **VII. Admin as data interface** — N/A: no data-management change.
 - **VIII. Schedule gating** — PASS: no times, durations, or frequencies involved.

@@ -31,7 +31,8 @@ one retry on timeout/connection errors:
 
 - `request` JSON part: `{model: "muse-voice-transcribe-1.0",
   audioEncoding: "WAV", mode: "PUSH_TO_TALK",
-  languageBias: ["english"], keywords: [<stop names>]}`.
+  languageBias: ["english"]}` (no `keywords`: the endpoint 400s
+  arbitrary vocabulary content, failing the whole transcription).
 - Audio part: WAV bytes as `audio/wav`.
 - Headers: `Accept: application/json`, `Authorization: Bearer <key>`
   (server-side key, unchanged handling).

@@ -17,7 +17,7 @@ incompatible OpenAI-SDK `audio.transcriptions` shape.
 
 | Part | Content-Type | Meaning |
 |------|--------------|---------|
-| `request` | `application/json` | `{model: "muse-voice-transcribe-1.0", audioEncoding: "WAV", mode: "PUSH_TO_TALK", languageBias: ["english"], keywords: [<stop names>]}` |
+| `request` | `application/json` | `{model: "muse-voice-transcribe-1.0", audioEncoding: "WAV", mode: "PUSH_TO_TALK", languageBias: ["english"]}` — no `keywords` key (biasing removed, see Errors) |
 | `audio` | `audio/wav` | Spoken question bytes: mono 16-bit PCM WAV at 16 or 24 kHz (24 kHz preferred), filename normalized to `*.wav` (WAV requirement; other rates get HTTP 503) |
 
 Headers: `Accept: application/json`, `Authorization: Bearer <server-side key>`. No `sessionId` is sent.
@@ -34,6 +34,11 @@ cannot-transcribe message), same as undecodable audio today.
   cannot-transcribe message (existing 400 shape, no key or upstream
   detail leaked).
 - Upstream non-200 / malformed body → same plain-language message.
+- No `keywords` are sent: live probing showed the endpoint rejects
+  arbitrary vocabulary content (e.g. one stop name fails while every
+  other probed name passes, independent of length, word count, and
+  list size), and a single rejected keyword 400s the whole
+  transcription — so vocabulary biasing is omitted by design.
 
 ## Non-goals
 

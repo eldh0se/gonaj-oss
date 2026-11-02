@@ -89,16 +89,16 @@ class TranscribeTests(ApiTestCase):
             stub.kwargs[0]["audio_bytes"].startswith(b"RIFF")
         )
 
-    def test_success_passes_stop_keywords_list(self):
+    def test_success_sends_no_keywords_key(self):
+        # Regression: a stop name ("Aarow Global Business Solutions")
+        # made the endpoint 400 the whole transcription, so no
+        # vocabulary bias is sent at all.
         stub = StubVoice(text="How do I get to Fort Kochi?")
         provider.transcribe_audio = stub
         response = self.post_audio()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(stub.calls, 1)
-        keywords = stub.kwargs[0]["keywords"]
-        self.assertIsInstance(keywords, list)
-        self.assertTrue(all(isinstance(name, str) for name in keywords))
-        self.assertLessEqual(len(keywords), 100)
+        self.assertNotIn("keywords", stub.kwargs[0])
 
     def test_filename_normalized_to_wav(self):
         stub = StubVoice(text="hello")

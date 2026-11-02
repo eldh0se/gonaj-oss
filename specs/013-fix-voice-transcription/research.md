@@ -28,13 +28,19 @@ implementation has no open choices.
 
 - **Decision**: `multipart/form-data` with a `request` JSON part
   `{model: "muse-voice-transcribe-1.0", audioEncoding: "WAV",
-  mode: "PUSH_TO_TALK", languageBias: ["english"], keywords: <stop list>}`
-  plus the `audio` part (`audio/wav`), `Accept: application/json`,
+  mode: "PUSH_TO_TALK", languageBias: ["english"]}` (no `keywords`)
+  plus the `audio` part, `Accept: application/json`,
   no `sessionId`; parse `TranscribeResponse.transcript` (empty
   transcript = failure, same as today).
 - **Rationale**: Matches the endpoint's contract exactly: model pin,
-  WAV encoding declaration, push-to-talk mode, English bias, and the
-  existing stop-name keyword biasing carried over as `keywords`.
+  WAV encoding declaration, push-to-talk mode, English bias.
+  Vocabulary biasing was tried first (stop names as `keywords`) and
+  then removed: live probing showed the endpoint rejects arbitrary
+  vocabulary content with a 400 that fails the whole transcription —
+  one stop name failed alone while every other probed name passed,
+  independent of length, word count, and list size — so no safe
+  subset can be constructed. Transcription relies on the base model
+  with no bias hints.
 - **Alternatives considered**:
   - Single JSON body with base64 audio: rejected — doubles payload size
     and contradicts the endpoint's multipart contract.
@@ -68,8 +74,9 @@ implementation has no open choices.
 - **Decision**: Reuse, in this order:
   - View shape, throttle classes, 5 MB bound, and plain-language error
     responses in `backend/apps/journey/views.py` (`transcribe`).
-  - `_with_one_retry` bounded-retry helper and `_stop_vocabulary`
-    keyword biasing in the provider module.
+  - `_with_one_retry` bounded-retry helper in the provider module.
+    (`_stop_vocabulary` keyword biasing was removed: the endpoint
+    400s arbitrary vocabulary content.)
   - Existing tests as the update base: `test_transcribe.py`
     (endpoint behavior), `test_meta.py` (provider, stubbed at the
     `httpx` boundary instead of the SDK), and the root

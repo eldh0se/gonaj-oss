@@ -190,5 +190,5 @@ SC-004 are satisfied (backend 198 green, frontend 64 green).
 - Each user story is independently completable and testable
 - Verify tests fail before implementing
 - Commit after each task or logical group
-- Data-model constraints applied verbatim: "at most 5 MB", `audio/wav` only, `*.wav` filename, mono 16-bit PCM at 16 or 24 kHz (24 kHz preferred), 20 s timeout, "at most one retry", 100-name keyword cap
+- Data-model constraints applied verbatim: "at most 5 MB", `audio/wav` only, `*.wav` filename, mono 16-bit PCM at 16 or 24 kHz (24 kHz preferred), 20 s timeout, "at most one retry", no `keywords` (biasing removed: endpoint 400s arbitrary vocabulary content)
 - No `sessionId` is sent; tests stub at the `httpx` boundary with no live network

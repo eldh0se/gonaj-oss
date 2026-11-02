@@ -24,12 +24,9 @@ from apps.journey.agent import run_journey
 from apps.journey.providers import meta as provider
 from apps.transport.api.errors import PlainBadRequest
 from apps.transport.api.throttling import READ_THROTTLE_CLASSES
-from apps.transport.models import Stop
-
 logger = logging.getLogger(__name__)
 
 MAX_AUDIO_BYTES = 5 * 1024 * 1024
-STOP_VOCABULARY_LIMIT = 100
 
 
 def _bad_request(detail):
@@ -65,23 +62,6 @@ def journey(request):
         question=question, history=history, context=context
     )
     return Response(payload)
-
-
-def _stop_vocabulary():
-    """Stop names for transcription vocabulary biasing (capped).
-
-    The stop table carries no frequency signal, so the first names in
-    alphabetical order stand in for the highest-frequency names.
-    """
-    return [
-        name
-        for name in (
-            Stop.objects.order_by("name")
-            .values_list("name", flat=True)
-            .distinct()[:STOP_VOCABULARY_LIMIT]
-        )
-        if name
-    ]
 
 
 def _wav_params(audio):
@@ -179,7 +159,6 @@ def transcribe(request):
             filename=_normalized_wav_filename(
                 getattr(upload, "name", "")
             ),
-            keywords=_stop_vocabulary(),
         )
     except Exception:
         logger.exception("journey transcription failed")
