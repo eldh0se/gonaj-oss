@@ -47,13 +47,19 @@ per `test_journey.py`
 
 **Performance Goals**: Pair test bounded at 200 pairs nearest-first (each
 empty pair = 1 indexed query); `search_places` pre-grouping cap 100/side
-unchanged; `nearby_stops` ≤100 rows; no separate latency target — bounded
+unchanged; `nearby_stops` ≤100 rows; inexact intent-check retries bounded at
+3 attempts per end with `exclude_ids`; no separate latency target — bounded
 work instead
 
 **Constraints**: Read-only tools (never raise; `{"ok": False, ...}` on bad
 input); no new services, queues, or routing engines; response `meta`
 (model, provider, latency) and `tools_used` audit logging preserved via
-`execute_tool`
+`execute_tool`/`_direct_tool`; name search is two-stage (`exact` True on
+`icontains` hit, `exact` False plus token scores on overlap fallback ranked
+by shared count desc, exact-phrase bonus, fewer extra tokens, name, id);
+`exclude_ids` skips rejected candidates; `MAX_TOOL_TURNS` (4), `pos_from <
+pos_to` verifier, 200-pair cap, 5-destination cap, and FR-011 no-bypass stay
+unchanged
 
 **Scale/Scope**: ≤100 stops per `search_places` side → ≤200 tested pairs;
 ≤5 destinations cited; ≤3 walk-note mates per end + overflow count

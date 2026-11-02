@@ -20,6 +20,82 @@ from apps.transport.models import Stop
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_TURNS = 4
+MAX_RESOLVE_ATTEMPTS = 3
+
+
+def _short(text, limit=1000):
+    """Truncate model content for debug logs without losing the decision."""
+    text = text or ""
+    if len(text) > limit:
+        return text[:limit] + f"...[truncated {len(text) - limit} chars]"
+    return text
+
+
+_JOURNEY_LOG_LOGGERS = ("apps.journey.agent", "apps.journey.tools")
+
+_active_request_log_buffer = None
+
+
+class _RequestLogBuffer(logging.Handler):
+    """Per-request log buffer: replay all on failure, audit only on success.
+
+    Held for the duration of one run_journey call while journey-logger
+    propagation is muted, so the console stays quiet on the success path
+    (the matrix / walk-mate fan-out can reach tens of thousands of lines)
+    while refuse and disambiguation paths replay the full trace for
+    diagnosis. INFO and above (the audit line, exceptions) always replay;
+    DEBUG replays only when the outcome is kept.
+    """
+
+    def __init__(self):
+        super().__init__(level=logging.DEBUG)
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+
+def _attach_request_log_buffer():
+    """Mute journey loggers for one request; returns state for release.
+
+    Also drops a stale buffer left by an earlier request that never
+    reached its funnel, so logging can never wedge silent.
+    """
+    global _active_request_log_buffer
+    if _active_request_log_buffer is not None:
+        _release_request_log_buffer(keep=False)
+    state = []
+    for name in _JOURNEY_LOG_LOGGERS:
+        journey_logger = logging.getLogger(name)
+        buffer = _RequestLogBuffer()
+        journey_logger.addHandler(buffer)
+        state.append((journey_logger, buffer, journey_logger.propagate))
+        journey_logger.propagate = False
+    _active_request_log_buffer = state
+    return state
+
+
+def _release_request_log_buffer(keep):
+    """Detach request buffers and replay them.
+
+    INFO and above (the audit line, exceptions) always replay; DEBUG
+    replays only when keep is True (refuse / disambiguate outcomes).
+    """
+    global _active_request_log_buffer
+    state, _active_request_log_buffer = _active_request_log_buffer, None
+    if not state:
+        return
+    for journey_logger, buffer, saved_propagate in state:
+        try:
+            journey_logger.removeHandler(buffer)
+        except ValueError:
+            pass
+        journey_logger.propagate = saved_propagate
+    root_logger = logging.getLogger()
+    for _, buffer, _ in state:
+        for record in buffer.records:
+            if keep or record.levelno >= logging.INFO:
+                root_logger.handle(record)
 
 SYSTEM_PROMPT = (
     "You are the Gonaj journey helper. Answer in everyday language "
@@ -545,6 +621,12 @@ def _validate_tool_args(name, args):
         for key in ("query", "bbox"):
             if key in args and not isinstance(args[key], str):
                 return None
+        if "exclude_ids" in args:
+            ids = args["exclude_ids"]
+            if not isinstance(ids, list) or any(
+                not _is_int(value) or value < 1 for value in ids
+            ):
+                return None
     elif name == "find_routes_matrix":
         for key in ("from_ids", "to_ids"):
             ids = args.get(key)
@@ -603,8 +685,10 @@ def _validate_tool_args(name, args):
 def execute_tool(name, args, tracker):
     """Run one model-requested tool call, recording it for the audit log."""
     tracker["tools_used"].append(name)
+    logger.debug("journey agent model requested tool %s args=%r", name, args)
     validated = _validate_tool_args(name, args) if name in _TOOL_FUNCTIONS else None
     if validated is None:
+        logger.debug("journey agent tool %s rejected by validator", name)
         return {
             "ok": False,
             "error": "That tool call did not look right, so it was not run.",
@@ -659,13 +743,29 @@ def _model_turn(messages):
         messages=messages,
         tools=tools.to_openai_tools(),
     )
-    return response.choices[0].message
+    message = response.choices[0].message
+    calls = [
+        getattr(getattr(call, "function", None), "name", "?")
+        for call in getattr(message, "tool_calls", None) or []
+    ]
+    logger.debug(
+        "journey agent model thinking=%r tool_calls=%s",
+        _short(getattr(message, "content", None)),
+        calls,
+    )
+    return message
 
 
 def _verify_route(route_id, from_id, to_id, tracker):
     """Independent DB check: servable route holds both stops in order."""
     detail = _direct_tool("get_route_detail", {"route_id": route_id}, tracker)
     if not detail.get("ok"):
+        logger.debug(
+            "journey agent verify route=%r from=%r to=%r decision=missing-detail",
+            route_id,
+            from_id,
+            to_id,
+        )
         return None
     positions = {}
     for step in detail["route"]["stops"]:
@@ -676,7 +776,22 @@ def _verify_route(route_id, from_id, to_id, tracker):
         and to_id in positions
         and positions[from_id] < positions[to_id]
     ):
+        logger.debug(
+            "journey agent verify route=%r from=%r(pos %s) to=%r(pos %s) decision=verified",
+            route_id,
+            from_id,
+            positions[from_id],
+            to_id,
+            positions[to_id],
+        )
         return detail["route"]
+    logger.debug(
+        "journey agent verify route=%r from=%r to=%r positions=%r decision=rejected",
+        route_id,
+        from_id,
+        to_id,
+        positions,
+    )
     return None
 
 
@@ -723,6 +838,7 @@ WALK_MATE_RADIUS_M = 150.0
 
 def _direct_tool(name, args, tracker):
     """Call a tool outside the model loop, still recording audit trail."""
+    logger.debug("journey agent direct tool %s args=%r", name, args)
     tracker["tools_used"].append(name)
     try:
         result = _TOOL_FUNCTIONS[name](**args)
@@ -775,20 +891,195 @@ def _group_for_stop(stop_id, tracker):
     return None
 
 
-def _resolve_end(text, tracker):
-    """Resolve one end's text to groups. Returns (groups, problem).
+def _resolve_end(text, tracker, exclude_ids=None):
+    """Resolve one end's text to groups. Returns (groups, problem, exact).
 
     problem is None on success, else ("empty",) or ("zoom_in", detail).
+    exact mirrors the search_places exact flag: True on icontains hit,
+    False on token-overlap fallback. ``exclude_ids`` skips rejected
+    intent-check candidates.
     """
-    result = _direct_tool("search_places", {"query": text}, tracker)
+    args = {"query": text}
+    if exclude_ids:
+        args["exclude_ids"] = list(exclude_ids)
+    logger.debug(
+        "journey agent resolve end=%r excluded=%s", text, list(exclude_ids or [])
+    )
+    result = _direct_tool("search_places", args, tracker)
     if not result.get("ok"):
-        return None, ("empty",)
+        logger.debug("journey agent resolve end=%r decision=error", text)
+        return None, ("empty",), False
     if result.get("status") == "zoom_in":
-        return None, ("zoom_in", result.get("detail") or "")
+        logger.debug("journey agent resolve end=%r decision=zoom_in", text)
+        return None, ("zoom_in", result.get("detail") or ""), True
     groups = result.get("groups", [])
+    exact = result.get("exact", True)
     if not groups:
-        return None, ("empty",)
-    return groups, None
+        logger.debug(
+            "journey agent resolve end=%r decision=empty exact=%s", text, exact
+        )
+        return None, ("empty",), exact
+    logger.debug(
+        "journey agent resolve end=%r decision=resolved exact=%s groups=%d labels=%s",
+        text,
+        exact,
+        len(groups),
+        [g.get("label") for g in groups[:5]],
+    )
+    return groups, None, exact
+
+
+_INTENT_REJECT = re.compile(r"\bREJECT\b", re.IGNORECASE)
+_INTENT_IDS = re.compile(r"\d+")
+
+
+def _intent_check_groups(end_text, groups, tracker):
+    """Model intent check for inexact (fallback) groups.
+
+    Sends the top 5 groups with token scores to the model and asks it to
+    reject on direction or name mismatch (for example North vs South, or
+    a different station name). The model replies ``REJECT <ids...>`` with
+    rejected member ids, or ``ACCEPT`` when the groups match the intent.
+    Returns (accepted, rejected_ids).
+    """
+    top = list(groups or [])[:5]
+    lines = []
+    for group in top:
+        members = ", ".join(
+            f"{member.get('name')}#{member.get('id')}"
+            for member in (group.get("members") or [])[:5]
+        )
+        lines.append(
+            f"- {group.get('label')} score={group.get('score', 0)} "
+            f"shared={group.get('shared', 0)} "
+            f"phrase_bonus={group.get('phrase_bonus', group.get('exact_bonus', 0))} "
+            f"extra={group.get('extra', 0)} members=[{members}]"
+        )
+    prompt = (
+        f"The passenger asked for '{end_text}'. The place search was "
+        "inexact (token overlap, exact=False). Top candidates with scores:\n"
+        + "\n".join(lines)
+        + "\nReply with ACCEPT when a candidate matches the passenger's "
+        "intent, or REJECT <member ids> listing every candidate whose "
+        "direction (North/South/East/West) or station name mismatches "
+        "the request."
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": "You check place-search intent. Reject on direction "
+            "or name mismatch. Reply ACCEPT or REJECT <member ids>.",
+        },
+        {"role": "user", "content": prompt},
+    ]
+    logger.debug(
+        "journey agent intent-check end=%r top5=%s",
+        end_text,
+        [
+            (g.get("label"), g.get("score"), g.get("shared"))
+            for g in top
+        ],
+    )
+    try:
+        message = _model_turn(messages)
+    except Exception:
+        logger.debug(
+            "journey agent intent-check end=%r decision=accept(model-error)",
+            end_text,
+        )
+        return True, []
+    content = getattr(message, "content", None) or ""
+    if not _INTENT_REJECT.search(content):
+        logger.debug(
+            "journey agent intent-check end=%r reply=%r decision=accept",
+            end_text,
+            _short(content),
+        )
+        return True, []
+    member_ids = set(_member_ids(top))
+    rejected = [
+        int(value)
+        for value in _INTENT_IDS.findall(content)
+        if int(value) in member_ids
+    ]
+    if not rejected:
+        rejected = sorted(member_ids)
+    logger.debug(
+        "journey agent intent-check end=%r reply=%r decision=reject ids=%s",
+        end_text,
+        _short(content),
+        rejected,
+    )
+    return False, rejected
+
+
+def _resolve_with_retry(text, tracker, max_attempts=MAX_RESOLVE_ATTEMPTS):
+    """Resolve one end, retrying inexact hits via model intent check.
+
+    Exact (icontains) hits return immediately. Inexact fallback groups go
+    to the model (top 5 with scores); on REJECT the named member ids join
+    the excluded set and search_places retries with exclude_ids. Stops
+    after max_attempts, an empty result, or an exact match. Returns
+    (groups, problem, exact, excluded) where problem is None on usable
+    groups, else ("empty",), ("zoom_in", detail), or ("rejected",).
+    """
+    excluded = []
+    excluded_set = set()
+    last_groups = None
+    last_exact = False
+    for attempt in range(1, max_attempts + 1):
+        logger.debug(
+            "journey agent retry end=%r attempt=%d/%d excluded=%s",
+            text,
+            attempt,
+            max_attempts,
+            excluded,
+        )
+        groups, problem, exact = _resolve_end(
+            text, tracker, exclude_ids=excluded or None
+        )
+        if problem is not None:
+            logger.debug(
+                "journey agent retry end=%r attempt=%d decision=stop problem=%s",
+                text,
+                attempt,
+                problem[0],
+            )
+            return groups, problem, exact, excluded
+        if exact:
+            logger.debug(
+                "journey agent retry end=%r attempt=%d decision=exact-match",
+                text,
+                attempt,
+            )
+            return groups, None, True, excluded
+        last_groups, last_exact = groups, exact
+        accepted, rejected = _intent_check_groups(text, groups, tracker)
+        if accepted:
+            logger.debug(
+                "journey agent retry end=%r attempt=%d decision=intent-accepted",
+                text,
+                attempt,
+            )
+            return groups, None, False, excluded
+        fresh = [rid for rid in rejected if rid not in excluded_set]
+        if not fresh:
+            logger.debug(
+                "journey agent retry end=%r attempt=%d decision=intent-rejected-no-new-ids stop",
+                text,
+                attempt,
+            )
+            return groups, ("rejected",), False, excluded
+        excluded_set.update(fresh)
+        excluded = sorted(excluded_set)
+    if last_groups is None:
+        return None, ("empty",), False, excluded
+    logger.debug(
+        "journey agent retry end=%r decision=attempts-exhausted excluded=%s",
+        text,
+        excluded,
+    )
+    return last_groups, ("rejected",), last_exact, excluded
 
 
 def _mates_for(direct_id, direct, members, cache, tracker):
@@ -938,6 +1229,12 @@ def _matrix_answer(from_ids, to_ids, from_groups, to_groups, tracker):
     Returns (answer_item_or_None, info) where info carries
     ``truncated``, ``untested_from_ids`` and ``untested_to_ids``.
     """
+    logger.debug(
+        "journey agent matrix from=%d to=%d cap=%d",
+        len(list(from_ids)),
+        len(list(to_ids)),
+        tools.MATRIX_PAIR_CAP,
+    )
     result = _direct_tool(
         "find_routes_matrix",
         {
@@ -953,14 +1250,25 @@ def _matrix_answer(from_ids, to_ids, from_groups, to_groups, tracker):
         "untested_to_ids": [],
     }
     if not result.get("ok"):
+        logger.debug("journey agent matrix decision=tool-error")
         return None, info
     info = {
         "truncated": bool(result.get("truncated")),
         "untested_from_ids": list(result.get("untested_from_ids", [])),
         "untested_to_ids": list(result.get("untested_to_ids", [])),
     }
+    logger.debug(
+        "journey agent matrix candidate-pairs=%d truncated=%s",
+        len(result.get("pairs", [])),
+        info["truncated"],
+    )
     classified = _classify_pairs(
         result.get("pairs", []), from_groups, to_groups, tracker
+    )
+    logger.debug(
+        "journey agent matrix decision=%s verified=%d",
+        "answer" if classified else "no-viable-pair",
+        len(classified),
     )
     if not classified:
         return None, info
@@ -1021,9 +1329,12 @@ def _expanded_singleton_answer(from_id, to_id, tracker):
 def _remaining_from_groups(question, known_slot, known_id, tracker):
     """Derive the other end via search_places groups (replaces single-stop).
 
-    Returns (core, None) on answer, (None, "unknown") when unmatched,
-    (None, "noviable") when groups resolve but no pair works, or None
-    when the question carries no usable other end.
+    Inexact hits go through the model intent check with exclude_ids
+    retry (see _resolve_with_retry) instead of auto-answering. Returns
+    (core, None) on answer, (None, "unknown") when unmatched,
+    (None, "noviable") when groups resolve but no pair works (including
+    intent-rejected ends), or None when the question carries no usable
+    other end.
     """
     match = _FROM_TO.search(question or "")
     if not match:
@@ -1034,8 +1345,10 @@ def _remaining_from_groups(question, known_slot, known_id, tracker):
         other_text = match.group(1).strip()
     if not other_text:
         return None
-    groups, problem = _resolve_end(other_text, tracker)
-    if groups is None:
+    groups, problem, _exact, _excluded = _resolve_with_retry(
+        other_text, tracker
+    )
+    if groups is None or problem is not None:
         return None, "unknown"
     member_ids = _member_ids(groups)
     if not member_ids:
@@ -1063,6 +1376,13 @@ def _remaining_from_groups(question, known_slot, known_id, tracker):
 def _fresh_matrix_answer(question, tracker):
     """Deterministic groups-first answer for from-to questions.
 
+    Exact (icontains) ends resolve straight to the matrix flow. Inexact
+    (fallback, exact False) ends never auto-answer: the top 5 groups with
+    scores go to the model for a direction/name intent check, rejects
+    join the excluded set, and search_places retries with exclude_ids
+    (see _resolve_with_retry). Stops after MAX_RESOLVE_ATTEMPTS, an empty
+    result, or an exact match, then refuses or picks per FR-007.
+
     Returns (core, None) on answer, (None, (problem, ...)) for empty /
     zoom_in / no-viable ends, or None when the question has no usable
     two ends (falls through to the model loop).
@@ -1074,13 +1394,19 @@ def _fresh_matrix_answer(question, tracker):
     to_text = match.group(2).strip()
     if not from_text or not to_text:
         return None
-    from_groups, from_problem = _resolve_end(from_text, tracker)
-    to_groups, to_problem = _resolve_end(to_text, tracker)
+    from_groups, from_problem, _from_exact, _from_excluded = (
+        _resolve_with_retry(from_text, tracker)
+    )
+    to_groups, to_problem, _to_exact, _to_excluded = _resolve_with_retry(
+        to_text, tracker
+    )
     if from_problem is not None or to_problem is not None:
         failed = "from" if from_problem is not None else "to"
         problem = from_problem or to_problem
         if problem[0] == "zoom_in":
             return None, ("zoom_in", problem[1])
+        if problem[0] == "rejected":
+            return None, ("noviable",)
         return None, ("unknown", failed)
     item, info = _matrix_answer(
         _member_ids(from_groups),
@@ -1124,6 +1450,14 @@ def run_journey(*, question, history=(), context=None):
         return {"status": "refuse", "message": _ASK_AGAIN, "meta": meta}, []
 
     tracker = {"tools_used": [], "calls": [], "findings": {}, "searches": []}
+    logger.debug(
+        "journey agent question=%r history_turns=%d context_keys=%s candidate_ids=%s",
+        question.strip()[:300],
+        len(history or []),
+        sorted(context.keys()),
+        candidate_ids,
+    )
+    _attach_request_log_buffer()
 
     def selection_finish(payload):
         latency_ms = int((time.monotonic() - started) * 1000)
@@ -1131,6 +1465,12 @@ def run_journey(*, question, history=(), context=None):
         payload["meta"] = meta
         _log(
             meta["model"], meta["provider"], latency_ms, tracker["tools_used"]
+        )
+        _release_request_log_buffer(keep=(payload.get("status") != "ok"))
+        logger.debug(
+            "journey agent decision=%s tools_used=%s",
+            payload.get("status"),
+            tracker["tools_used"],
         )
         return payload, tracker["tools_used"]
 
@@ -1192,7 +1532,9 @@ def run_journey(*, question, history=(), context=None):
         )
 
     selection = _resolve_selection(context, question)
+    logger.debug("journey agent selection=%s", selection[0])
     if selection[0] == "invalid":
+        logger.debug("journey agent decision=refuse reason=unmatched-pick")
         return selection_finish(
             {"status": "refuse", "message": _UNMATCHED_PICK}
         )
@@ -1327,16 +1669,28 @@ def run_journey(*, question, history=(), context=None):
         meta = _meta(latency_ms, fallback=fallback)
         payload["meta"] = meta
         _log(meta["model"], meta["provider"], latency_ms, tracker["tools_used"])
+        _release_request_log_buffer(keep=(payload.get("status") != "ok"))
+        logger.debug(
+            "journey agent decision=%s fallback=%s tools_used=%s",
+            payload.get("status"),
+            fallback,
+            tracker["tools_used"],
+        )
         return payload, tracker["tools_used"]
 
     def fallback():
         for route_id, (from_id, to_id) in tracker["findings"].items():
             route = _verify_route(route_id, from_id, to_id, tracker)
             if route is not None:
+                logger.debug(
+                    "journey agent fallback decision=answer route=%r",
+                    route_id,
+                )
                 payload, _ = _answer_payload(
                     route, from_id, to_id, "", _meta(0, fallback=True)
                 )
                 return finish(payload, fallback=True)
+        logger.debug("journey agent fallback decision=refuse reason=cannot-answer")
         return finish({"status": "refuse", "message": _CANNOT_ANSWER}, fallback=True)
 
     if selection[0] in ("none", "fresh"):
@@ -1345,10 +1699,21 @@ def run_journey(*, question, history=(), context=None):
             item, problem = fresh
             if item is not None:
                 ranked, route, from_id, to_id = item
+                logger.debug(
+                    "journey agent fresh-matrix decision=answer route=%r from=%r to=%r",
+                    route["id"],
+                    from_id,
+                    to_id,
+                )
                 payload = ranked_payload(
                     ranked, route, from_id, to_id, ""
                 )
                 return finish(payload)
+            logger.debug(
+                "journey agent fresh-matrix decision=%s problem=%s",
+                "pick" if problem[0] in ("unknown", "truncated") else "refuse",
+                problem[0],
+            )
             if problem[0] == "unknown":
                 _, slot = problem
                 return finish(
@@ -1370,12 +1735,22 @@ def run_journey(*, question, history=(), context=None):
 
     try:
         draft = ""
-        for _ in range(MAX_TOOL_TURNS):
+        for turn in range(1, MAX_TOOL_TURNS + 1):
             message = _model_turn(messages)
             entry = _assistant_entry(message)
             if not entry["tool_calls"]:
                 draft = entry["content"] or ""
+                logger.debug(
+                    "journey agent model-loop turn=%d decision=draft draft=%r",
+                    turn,
+                    _short(draft),
+                )
                 break
+            logger.debug(
+                "journey agent model-loop turn=%d tool_calls=%d",
+                turn,
+                len(entry["tool_calls"]),
+            )
             messages.append(entry)
             for call in entry["tool_calls"]:
                 try:
@@ -1393,6 +1768,9 @@ def run_journey(*, question, history=(), context=None):
                     }
                 )
         else:
+            logger.debug(
+                "journey agent model-loop decision=refuse reason=max-tool-turns"
+            )
             return finish({"status": "refuse", "message": _UNVERIFIABLE})
 
         cited = []
@@ -1403,17 +1781,32 @@ def run_journey(*, question, history=(), context=None):
 
         def verified_answer(text):
             if _forbidden(text):
+                logger.debug(
+                    "journey agent verified-answer decision=reject reason=forbidden-shaped draft=%r",
+                    _short(text),
+                )
                 return None
             verified = []
             for rid in cited:
                 pair = tracker["findings"].get(rid)
                 if pair is None:
+                    logger.debug(
+                        "journey agent verified-answer decision=reject reason=uncited-route route=%r",
+                        rid,
+                    )
                     return None
                 route = _verify_route(rid, pair[0], pair[1], tracker)
                 if route is None:
+                    logger.debug(
+                        "journey agent verified-answer decision=reject reason=unverifiable-pair route=%r",
+                        rid,
+                    )
                     return None
                 verified.append((route, pair[0], pair[1]))
             if not verified:
+                logger.debug(
+                    "journey agent verified-answer decision=reject reason=no-verified-routes"
+                )
                 return None
             pairs = [
                 {"route_id": route["id"], "from_id": f, "to_id": t}
@@ -1438,10 +1831,14 @@ def run_journey(*, question, history=(), context=None):
 
         answer = verified_answer(draft) if cited else None
         if answer is None and cited:
+            logger.debug("journey agent model-loop decision=repair-retry")
             messages.append({"role": "user", "content": REPAIR_NUDGE})
             try:
                 repair = _model_turn(messages)
                 draft = getattr(repair, "content", None) or ""
+                logger.debug(
+                    "journey agent model-loop repair draft=%r", _short(draft)
+                )
             except Exception:
                 return fallback()
             cited = []
@@ -1451,16 +1848,22 @@ def run_journey(*, question, history=(), context=None):
                     cited.append(rid)
             answer = verified_answer(draft) if cited else None
             if answer is None:
+                logger.debug(
+                    "journey agent model-loop decision=refuse reason=unrepairable"
+                )
                 return finish({"status": "refuse", "message": _UNVERIFIABLE})
         if answer is not None:
+            logger.debug("journey agent model-loop decision=answer")
             return finish(answer)
 
         enriched = _disambiguation_context(question, tracker["searches"])
         if enriched is not None:
+            logger.debug("journey agent model-loop decision=disambiguate")
             return finish(enriched)
         for _args, result in reversed(tracker["searches"]):
             stops = result.get("stops", [])
             if len(stops) > 1:
+                logger.debug("journey agent model-loop decision=disambiguate")
                 return finish(
                     {
                         "status": "disambiguate",
@@ -1473,11 +1876,20 @@ def run_journey(*, question, history=(), context=None):
                 )
         for _args, result in tracker["searches"]:
             if result.get("status") == "empty":
+                logger.debug(
+                    "journey agent model-loop decision=refuse reason=unknown-place"
+                )
                 return finish({"status": "refuse", "message": _UNKNOWN_PLACE})
         for name, _args, result in tracker["calls"]:
             if name == "find_routes" and result.get("ok"):
                 if not result.get("routes"):
+                    logger.debug(
+                        "journey agent model-loop decision=refuse reason=no-direct"
+                    )
                     return finish({"status": "refuse", "message": _NO_DIRECT})
+        logger.debug(
+            "journey agent model-loop decision=refuse reason=unverifiable"
+        )
         return finish({"status": "refuse", "message": _UNVERIFIABLE})
     except Exception:
         logger.exception("journey model loop failed")

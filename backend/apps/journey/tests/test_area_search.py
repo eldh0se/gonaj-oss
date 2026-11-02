@@ -45,6 +45,122 @@ def make_kaloor_corridor(label="factory-area-search"):
     }
 
 
+class JourneyDebugLogTests(TestCase):
+    """Debug trace: question, tool outputs, and per-step decisions."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.geo = make_kaloor_corridor(label="factory-area-debug-logs")
+
+    def test_debug_trace_covers_query_tools_and_decision(self):
+        from apps.journey.agent import run_journey
+        from apps.journey.providers import meta as provider
+
+        real = provider.complete_with_tools
+        provider.complete_with_tools = UnusedModel()
+        try:
+            with (
+                self.assertLogs("apps.journey.agent", level="DEBUG") as agent_logs,
+                self.assertLogs("apps.journey.tools", level="DEBUG") as tool_logs,
+            ):
+                payload, _ = run_journey(
+                    question="How do I get from Aluva to Kaloor?"
+                )
+        finally:
+            provider.complete_with_tools = real
+        self.assertEqual(payload["status"], "ok")
+        agent_out = "\n".join(agent_logs.output)
+        tool_out = "\n".join(tool_logs.output)
+        self.assertIn("Aluva", agent_out)
+        self.assertIn("search_places", tool_out)
+        self.assertIn("find_routes_matrix", tool_out)
+        self.assertIn("decision=", agent_out)
+
+
+class RequestLogBufferTests(TestCase):
+    """Success stays quiet; failure replays the buffered debug trace."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.geo = make_kaloor_corridor(label="factory-log-buffer")
+
+    def _capture_root(self):
+        import logging
+
+        records = []
+
+        class Cap(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        handler = Cap(level=logging.DEBUG)
+        root = logging.getLogger()
+        root.addHandler(handler)
+        self.addCleanup(root.removeHandler, handler)
+        return records
+
+    def _journey_debugs(self, records):
+        import logging
+
+        return [
+            record
+            for record in records
+            if record.name.startswith("apps.journey.")
+            and record.levelno == logging.DEBUG
+        ]
+
+    def test_success_path_stays_quiet(self):
+        import logging
+
+        from apps.journey.agent import run_journey
+        from apps.journey.providers import meta as provider
+
+        real = provider.complete_with_tools
+        provider.complete_with_tools = UnusedModel()
+        self.addCleanup(setattr, provider, "complete_with_tools", real)
+        records = self._capture_root()
+        payload, _ = run_journey(
+            question="How do I get from Aluva to Kaloor?"
+        )
+        self.assertEqual(payload["status"], "ok")
+        texts = [record.getMessage() for record in self._journey_debugs(records)]
+        self.assertTrue(texts, "question and decision lines stay visible")
+        self.assertFalse(
+            [text for text in texts if text.startswith("journey tool ")],
+            "no per-tool data flood on success",
+        )
+        self.assertFalse(
+            [text for text in texts if "verify" in text],
+            "no per-pair verifier flood on success",
+        )
+        self.assertTrue(
+            any(
+                record.name == "apps.journey.agent"
+                and record.levelno == logging.INFO
+                for record in records
+            ),
+            "audit line must still emit on success",
+        )
+
+    def test_failure_path_replays_trace(self):
+        from apps.journey.agent import run_journey
+        from apps.journey.providers import meta as provider
+
+        real = provider.complete_with_tools
+        provider.complete_with_tools = UnusedModel()
+        self.addCleanup(setattr, provider, "complete_with_tools", real)
+        records = self._capture_root()
+        payload, _ = run_journey(
+            question="How do I get from Aluva to Zzxq?"
+        )
+        self.assertEqual(payload["status"], "disambiguate")
+        debugs = self._journey_debugs(records)
+        self.assertTrue(debugs, "failure must replay buffered debug records")
+        self.assertTrue(
+            any("decision=" in record.getMessage() for record in debugs)
+        )
+
+
 class DistanceTests(TestCase):
     def test_known_pair_meters(self):
         out = tools.distance_m(9.9900, 76.2900, 9.9902, 76.2901)
@@ -379,3 +495,185 @@ class NearbyStopsTests(TestCase):
         out = tools.nearby_stops(lat=9.99, lon=76.29)
         self.assertTrue(out["ok"])
         self.assertEqual(len(out["stops"]), 100)
+
+
+class ExactFlagAndRankingTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        _, run = f.make_snapshot(label="factory-exact-ranking")
+        cls.south = f.make_stop(run, 971, "South Railway", 9.97, 76.28)
+        cls.north_station = f.make_stop(
+            run, 972, "North Railway Station", 9.96, 76.27
+        )
+        cls.aluva = f.make_stop(run, 973, "Aluva", 10.11, 76.35)
+
+    def test_icontains_hit_returns_exact_true(self):
+        stops_out = tools.search_stops(query="Aluva")
+        self.assertTrue(stops_out["ok"])
+        self.assertTrue(stops_out.get("exact"))
+        places_out = tools.search_places(query="Aluva")
+        self.assertTrue(places_out["ok"])
+        self.assertTrue(places_out.get("exact"))
+
+    def test_fallback_returns_exact_false_with_scores(self):
+        stops_out = tools.search_stops(query="South Railway Station")
+        self.assertTrue(stops_out["ok"])
+        self.assertFalse(stops_out.get("exact"))
+        self.assertTrue(stops_out["stops"])
+        for row in stops_out["stops"]:
+            self.assertIn("score", row)
+        places_out = tools.search_places(query="South Railway Station")
+        self.assertTrue(places_out["ok"])
+        self.assertFalse(places_out.get("exact"))
+        self.assertTrue(places_out["groups"])
+        for group in places_out["groups"]:
+            self.assertIn("score", group)
+
+    def test_south_preferred_over_north_station(self):
+        stops_out = tools.search_stops(query="South Railway Station")
+        ids = [stop["id"] for stop in stops_out["stops"]]
+        self.assertIn(self.south.id, ids)
+        self.assertIn(self.north_station.id, ids)
+        self.assertLess(ids.index(self.south.id), ids.index(self.north_station.id))
+        places_out = tools.search_places(query="South Railway Station")
+        labels = [group["label"] for group in places_out["groups"]]
+        self.assertIn("South Railway", labels)
+        self.assertIn("North Railway Station", labels)
+        self.assertLess(
+            labels.index("South Railway"),
+            labels.index("North Railway Station"),
+        )
+
+    def test_exclude_ids_skips_rejected(self):
+        stops_out = tools.search_stops(
+            query="South Railway Station", exclude_ids=[self.north_station.id]
+        )
+        ids = [stop["id"] for stop in stops_out["stops"]]
+        self.assertIn(self.south.id, ids)
+        self.assertNotIn(self.north_station.id, ids)
+        places_out = tools.search_places(
+            query="South Railway Station", exclude_ids=[self.north_station.id]
+        )
+        member_ids = [
+            member["id"] for group in places_out["groups"] for member in group["members"]
+        ]
+        self.assertIn(self.south.id, member_ids)
+        self.assertNotIn(self.north_station.id, member_ids)
+
+
+class RejectRetryTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        _, run = f.make_snapshot(label="factory-reject-retry")
+        master = f.make_master(
+            run, 61, "RetryLoop", operator="KSRTC", network="Kochi"
+        )
+        cls.aluva = f.make_stop(run, 961, "Aluva", 10.11, 76.35)
+        cls.south = f.make_stop(run, 962, "South Railway", 9.97, 76.28)
+        cls.north_station = f.make_stop(
+            run, 963, "North Railway Station", 9.96, 76.27
+        )
+        cls.route1 = f.make_route(run, 964, "Aluva-South")
+        f.link_master(run, master, cls.route1, 1)
+        f.link_stop(run, cls.route1, cls.aluva, 1)
+        f.link_stop(run, cls.route1, cls.south, 2)
+
+    def _patch_provider(self, scripted):
+        import apps.journey.providers.meta as provider_module
+
+        real = provider_module.complete_with_tools
+        provider_module.complete_with_tools = scripted
+        self.addCleanup(setattr, provider_module, "complete_with_tools", real)
+        return real
+
+    def test_reject_retry_excludes_north_answers_south(self):
+        from apps.journey.agent import run_journey
+
+        north_id = self.north_station.id
+        south_id = self.south.id
+        calls = []
+
+        class ScriptedModel:
+            def __init__(self):
+                self.n = 0
+
+            def __call__(self, **kwargs):
+                self.n += 1
+                calls.append(kwargs.get("messages", []))
+                if self.n == 1:
+                    return _Response(
+                        _Message(content=f"REJECT {north_id} direction mismatch north vs south")
+                    )
+                return _Response(_Message(content="ACCEPT direction and name match"))
+
+        seen_searches = []
+        import apps.journey.agent as agent_module
+
+        real_fn = agent_module._TOOL_FUNCTIONS["search_places"]
+
+        def spy_search_places(*args, **kwargs):
+            seen_searches.append(kwargs)
+            return real_fn(*args, **kwargs)
+
+        agent_module._TOOL_FUNCTIONS["search_places"] = spy_search_places
+        self.addCleanup(
+            agent_module._TOOL_FUNCTIONS.__setitem__,
+            "search_places",
+            real_fn,
+        )
+        self._patch_provider(ScriptedModel())
+
+        payload, tools_used = run_journey(
+            question="How do I get from Aluva to South Railway Station?"
+        )
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["alighting_stop"]["id"], south_id)
+        self.assertIn("search_places", tools_used)
+        self.assertIn("find_routes_matrix", tools_used)
+        self.assertGreaterEqual(len(calls), 1)
+        excluded_used = [
+            kw.get("exclude_ids", [])
+            for kw in seen_searches
+            if kw.get("exclude_ids")
+        ]
+        self.assertTrue(
+            excluded_used, "retry never passed exclude_ids to search_places"
+        )
+        self.assertIn(north_id, excluded_used[-1])
+
+    def test_loop_stops_after_bound(self):
+        from apps.journey.agent import run_journey
+
+        north_id = self.north_station.id
+        model_calls = []
+        search_calls = []
+        import apps.journey.agent as agent_module
+
+        real_fn = agent_module._TOOL_FUNCTIONS["search_places"]
+
+        def counting_search_places(*args, **kwargs):
+            search_calls.append((args, kwargs))
+            return real_fn(*args, **kwargs)
+
+        class AlwaysReject:
+            def __call__(self, **kwargs):
+                model_calls.append(kwargs.get("messages", []))
+                return _Response(
+                    _Message(content=f"REJECT {north_id} name mismatch")
+                )
+
+        agent_module._TOOL_FUNCTIONS["search_places"] = counting_search_places
+        self.addCleanup(
+            agent_module._TOOL_FUNCTIONS.__setitem__,
+            "search_places",
+            real_fn,
+        )
+        self._patch_provider(AlwaysReject())
+
+        payload, tools_used = run_journey(
+            question="How do I get from Aluva to South Railway Station?"
+        )
+        self.assertIn(payload["status"], ("refuse", "disambiguate"))
+        self.assertLessEqual(len(search_calls), 6)
+        self.assertLessEqual(len(model_calls), 3)
+        self.assertGreater(len(model_calls), 0)

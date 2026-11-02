@@ -120,6 +120,10 @@ repo convention is factory + stubbed-provider journey tests written first.
 - [X] T023 Single-ended query regression test in `backend/apps/journey/tests/test_area_search.py`: `"Kaloor buses?"` keeps legacy behavior (quickstart #9; out of scope, must not change)
 - [X] T024 Full validation run (journey 72 OK, transport 80 OK; quickstart #1–#12 each pinned by a test): `cd backend && python manage.py test apps.journey` green plus quickstart.md scenario walkthrough #1–#12
 - [X] T025 Re-run related suites green (`apps.transport` tests) to confirm no shared-helper regressions from the `tools.py` additions
+- [X] T026 [exact/retry] Failing tests first in `backend/apps/journey/tests/test_area_search.py`: South Railway prefers South Railway over North Railway Station (tools ranking), reject-retry excludes North and answers South (agent `exclude_ids`), loop stops after bound with no infinite calls
+- [X] T027 [exact/retry] `search_places` + `search_stops` in `backend/apps/journey/tools.py`: `exact` True on `icontains` hit, `exact` False plus token scores on overlap fallback ranked by shared count desc, exact-phrase bonus, fewer extra tokens, name, id; `exclude_ids` param skips rejected ids (schemas + validator updated)
+- [X] T028 [exact/retry] Intent-check retry in `backend/apps/journey/agent.py`: `exact` False ends skip auto-answer, top 5 groups with scores go to the model (reject on direction/name mismatch), rejects join the excluded set with `search_places` retry via `exclude_ids`; stop after `MAX_RESOLVE_ATTEMPTS` (3), empty, or exact match, then refuse/pick per FR-007; `MAX_TOOL_TURNS`, `pos_from < pos_to` verifier, 200-pair cap, 5-destination cap, `tools_used` audit, FR-011 no-bypass kept
+- [X] T029 [exact/retry] Spec FR-013 + edge-case bound, plan performance/constraints, and full suite green (`apps.journey` 82 OK, `apps.transport` 80 OK)
 
 ---
 

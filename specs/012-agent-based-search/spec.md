@@ -75,6 +75,7 @@ When no member pair across the resolved groups yields a direct route, the helper
 - Walk boundary: a mate at exactly 150m counts as walkable (d <= 150m is inclusive).
 - Group route counts are display hints only: a group listing a route MUST NOT be cited as proof that any particular member is served; proof comes only from the pair test plus route detail.
 - No bypass: old answer_direct single-pair path is replaced as entry flow and kept only as leaf verifier if needed. Picks never shortcut verification.
+- Inexact retry bound: intent-check retries stop after 3 attempts per end; each retry passes the rejected ids via `exclude_ids`, so the loop always terminates without unbounded model or tool calls.
 - Over-wide map area: a `zoom_in` result MUST lead to a narrow-the-area request or the map prompt, never to a silent substitution or an invented answer.
 
 ## Requirements *(mandatory)*
@@ -93,6 +94,7 @@ When no member pair across the resolved groups yields a direct route, the helper
 - **FR-010**: A wrong-side exact stop MUST NOT produce an exact-id refusal when a walkable mate of the same group is directly served; the helper MUST answer with the served stop plus the walk note instead.
 - **FR-011**: Agent search MUST go only through the agent loop search_places to find_routes_matrix to get_route_detail. No single-pair find_routes shortcut may answer inside run_journey, even for exact map taps or familiar users. A tap selects a member id only. If no viable pair exists, the helper may suggest direct from-to search for familiar users, but MUST NOT run it as the answer.
 - **FR-012**: When `search_places` returns `empty` for a name query (the place never matched), the helper MUST offer the map/list pick so the passenger can re-resolve. When it returns `zoom_in` for a map-area query, the helper MUST ask the passenger to narrow the area (or offer the map prompt); it MUST NOT silently substitute a different area.
+- **FR-013**: Name search is two-stage. A Stage-1 `icontains` hit returns `exact` True; the token-overlap fallback returns `exact` False plus per-stop/per-group token scores, ranked by shared token count desc, exact-phrase bonus, then fewer extra tokens, then name, id. An `exact` False end MUST NOT auto-answer: the top 5 groups with scores go to the model for a direction/name intent check, rejects join an excluded id set, and `search_places` retries with `exclude_ids`. The loop stops after 3 attempts, an empty result, or an exact match, then refuses or picks per FR-007.
 
 ### Key Entities
 
