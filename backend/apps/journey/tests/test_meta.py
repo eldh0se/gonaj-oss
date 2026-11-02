@@ -149,7 +149,8 @@ class TranscribeWireTests(TestCase):
         audio_part = kwargs["files"]["audio"]
         self.assertEqual(audio_part[0], "question.wav")
         self.assertEqual(audio_part[1], body)
-        self.assertEqual(audio_part[2], "audio/wav")
+        # Reference client sends the mimetypes guess (`audio/x-wav`).
+        self.assertEqual(audio_part[2], "audio/x-wav")
         self.assertEqual(
             kwargs["headers"]["Accept"], "application/json"
         )

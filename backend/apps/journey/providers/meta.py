@@ -112,7 +112,10 @@ def transcribe_audio(*, audio_bytes, filename="question.wav", keywords=()):
                 "audio": (
                     filename or "question.wav",
                     bytes(audio_bytes or b""),
-                    "audio/wav",
+                    # Match the reference client: `requests` sends the
+                    # mimetypes guess for .wav (`audio/x-wav`), not
+                    # `audio/wav`. The endpoint rejected `audio/wav`.
+                    "audio/x-wav",
                 ),
             },
             headers={
