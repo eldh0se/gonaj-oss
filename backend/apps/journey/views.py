@@ -73,12 +73,69 @@ def _stop_vocabulary():
     The stop table carries no frequency signal, so the first names in
     alphabetical order stand in for the highest-frequency names.
     """
-    names = (
-        Stop.objects.order_by("name")
-        .values_list("name", flat=True)
-        .distinct()[:STOP_VOCABULARY_LIMIT]
-    )
-    return ", ".join(name for name in names if name)
+    return [
+        name
+        for name in (
+            Stop.objects.order_by("name")
+            .values_list("name", flat=True)
+            .distinct()[:STOP_VOCABULARY_LIMIT]
+        )
+        if name
+    ]
+
+
+def _wav_params(audio):
+    """(channels, sample_rate, bits) for PCM WAV bytes, else None."""
+    import struct
+
+    if (
+        len(audio) < 44
+        or audio[0:4] != b"RIFF"
+        or audio[8:12] != b"WAVE"
+    ):
+        return None
+    offset = 12
+    while offset + 8 <= len(audio):
+        chunk_id = audio[offset : offset + 4]
+        (chunk_size,) = struct.unpack_from("<I", audio, offset + 4)
+        body = offset + 8
+        if chunk_id == b"fmt " and chunk_size >= 16:
+            (
+                audio_format,
+                channels,
+                sample_rate,
+                _byte_rate,
+                _block_align,
+                bits,
+            ) = struct.unpack_from("<HHIIHH", audio, body)
+            if audio_format != 1:
+                return None
+            return channels, sample_rate, bits
+        offset = body + chunk_size + (chunk_size % 2)
+    return None
+
+
+def _normalized_wav_filename(name):
+    """Force a ``*.wav`` filename, defaulting to ``question.wav``."""
+    stem = (name or "").rsplit(".", 1)[0].strip() or "question"
+    return f"{stem}.wav"
+
+
+def _is_wav_upload(upload, audio):
+    """True when the upload claims WAV and the bytes parse as PCM WAV."""
+    name = (getattr(upload, "name", "") or "").lower()
+    if not name.endswith(".wav"):
+        return False
+    if getattr(upload, "content_type", "") not in (
+        "audio/wav",
+        "audio/x-wav",
+    ):
+        return False
+    params = _wav_params(audio)
+    if params is None:
+        return False
+    channels, sample_rate, bits = params
+    return channels == 1 and bits == 16 and sample_rate in (16000, 24000)
 
 
 @api_view(["POST"])
@@ -111,12 +168,18 @@ def transcribe(request):
         raise PlainBadRequest(
             "We could not transcribe that audio. Please try again."
         )
+    if not _is_wav_upload(upload, audio):
+        raise PlainBadRequest(
+            "We could not transcribe that audio. Please try again."
+        )
     started = time.monotonic()
     try:
         result = provider.transcribe_audio(
             audio_bytes=audio,
-            filename=upload.name or "question.webm",
-            prompt=_stop_vocabulary(),
+            filename=_normalized_wav_filename(
+                getattr(upload, "name", "")
+            ),
+            keywords=_stop_vocabulary(),
         )
     except Exception:
         logger.exception("journey transcription failed")

@@ -27,6 +27,30 @@ class StubVoice:
         return SimpleNamespace(text=self.text)
 
 
+def wav_file_bytes(sample_rate=24000, channels=1, bits=16, marker=b"\x00\x00"):
+    """Minimal mono PCM WAV body for upload tests (013)."""
+    import struct
+
+    data = marker * 8000
+    block_align = channels * bits // 8
+    return struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        36 + len(data),
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        channels,
+        sample_rate,
+        sample_rate * block_align,
+        block_align,
+        bits,
+        b"data",
+        len(data),
+    ) + data
+
+
 class TranscribeTests(ApiTestCase):
     def setUp(self):
         super().setUp()
@@ -36,10 +60,17 @@ class TranscribeTests(ApiTestCase):
     def tearDown(self):
         provider.transcribe_audio = self._real
 
-    def post_audio(self, content=b"fake-audio-bytes", name="q.webm"):
+    def post_audio(
+        self,
+        content=None,
+        name="question.wav",
+        content_type="audio/wav",
+    ):
+        if content is None:
+            content = wav_file_bytes()
         return self.client.post(
             "/api/v1/journey/transcribe/",
-            {"audio": SimpleUploadedFile(name, content)},
+            {"audio": SimpleUploadedFile(name, content, content_type)},
             format="multipart",
         )
 
@@ -54,7 +85,66 @@ class TranscribeTests(ApiTestCase):
         self.assertEqual(body["meta"]["provider"], "meta")
         self.assertIsInstance(body["meta"]["latency_ms"], int)
         self.assertEqual(stub.calls, 1)
-        self.assertTrue(stub.kwargs[0]["audio_bytes"].startswith(b"fake-audio"))
+        self.assertTrue(
+            stub.kwargs[0]["audio_bytes"].startswith(b"RIFF")
+        )
+
+    def test_success_passes_stop_keywords_list(self):
+        stub = StubVoice(text="How do I get to Fort Kochi?")
+        provider.transcribe_audio = stub
+        response = self.post_audio()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(stub.calls, 1)
+        keywords = stub.kwargs[0]["keywords"]
+        self.assertIsInstance(keywords, list)
+        self.assertTrue(all(isinstance(name, str) for name in keywords))
+        self.assertLessEqual(len(keywords), 100)
+
+    def test_filename_normalized_to_wav(self):
+        stub = StubVoice(text="hello")
+        provider.transcribe_audio = stub
+        response = self.post_audio(name="MyRec.WAV")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(stub.calls, 1)
+        self.assertTrue(stub.kwargs[0]["filename"].endswith(".wav"))
+        self.assertNotIn("WAV", stub.kwargs[0]["filename"])
+
+    def test_non_wav_extension_rejected_before_model_call(self):
+        stub = StubVoice()
+        provider.transcribe_audio = stub
+        response = self.post_audio(
+            name="q.webm", content_type="audio/webm"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(stub.calls, 0)
+
+    def test_wrong_mime_rejected_before_model_call(self):
+        stub = StubVoice()
+        provider.transcribe_audio = stub
+        response = self.post_audio(content_type="audio/webm")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(stub.calls, 0)
+
+    def test_corrupt_wav_header_rejected(self):
+        stub = StubVoice()
+        provider.transcribe_audio = stub
+        response = self.post_audio(content=b"RIFF" + b"\x00" * 40)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(stub.calls, 0)
+
+    def test_unsupported_sample_rate_rejected(self):
+        stub = StubVoice()
+        provider.transcribe_audio = stub
+        response = self.post_audio(content=wav_file_bytes(sample_rate=8000))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(stub.calls, 0)
+
+    def test_stereo_rejected(self):
+        stub = StubVoice()
+        provider.transcribe_audio = stub
+        response = self.post_audio(content=wav_file_bytes(channels=2))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(stub.calls, 0)
 
     def test_missing_audio_is_plain_400_without_guess(self):
         response = self.client.post(

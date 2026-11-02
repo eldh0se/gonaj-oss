@@ -60,10 +60,13 @@ export function postJourney({ question, history, context } = {}, opts) {
   );
 }
 
-export async function postTranscribe(audioBlob, { signal } = {}) {
+export async function postTranscribe(
+  audioBlob,
+  { signal, filename = "question.wav" } = {}
+) {
   const started = Date.now();
   const form = new FormData();
-  form.append("audio", audioBlob, "question.webm");
+  form.append("audio", audioBlob, filename);
   let response;
   try {
     response = await fetch(`${API_BASE}/journey/transcribe/`, {

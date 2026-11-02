@@ -217,8 +217,10 @@ describe("JourneyPanel", () => {
 
   it("fills the transcript from dictation and sends the edited text", async () => {
     const bodies = [];
+    const uploads = [];
     const fetch = vi.fn(async (url, options) => {
       if (url.includes("transcribe")) {
+        uploads.push(options.body.get("audio"));
         return { ok: true, json: async () => ({ transcript: "dictated words" }) };
       }
       const body = JSON.parse(options.body);
@@ -259,6 +261,29 @@ describe("JourneyPanel", () => {
       }
     }
     vi.stubGlobal("MediaRecorder", MockRecorder);
+    class MockAudioContext {
+      async decodeAudioData() {
+        return { duration: 1 };
+      }
+      async close() {}
+    }
+    class MockOfflineAudioContext {
+      constructor(channels, length, rate) {
+        this.sampleRate = rate;
+      }
+      createBufferSource() {
+        return { connect() {}, start() {} };
+      }
+      async startRendering() {
+        return {
+          getChannelData: () => new Float32Array(24000),
+          sampleRate: 24000,
+          duration: 1,
+        };
+      }
+    }
+    vi.stubGlobal("AudioContext", MockAudioContext);
+    vi.stubGlobal("OfflineAudioContext", MockOfflineAudioContext);
 
     render(<JourneyPanel />);
     const dictate = screen.getByRole("button", { name: /dictate/i });
@@ -266,6 +291,9 @@ describe("JourneyPanel", () => {
     await screen.findByText(/listening/i);
     fireEvent.pointerUp(dictate);
     expect(await screen.findByDisplayValue("dictated words")).toBeTruthy();
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0].name).toBe("question.wav");
+    expect(uploads[0].type).toBe("audio/wav");
 
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "edited words" },
@@ -275,6 +303,57 @@ describe("JourneyPanel", () => {
     expect(bodies).toHaveLength(1);
     expect(bodies[0].question).toBe("edited words");
     expect(tracks[0].stop).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the plain message when WAV encoding fails and uploads nothing", async () => {
+    const fetch = vi.fn(async () => {
+      throw new Error("should not upload");
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    const tracks = [{ stop: vi.fn() }];
+    const stream = { getTracks: () => tracks };
+    Object.defineProperty(globalThis.navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn(async () => stream) },
+      configurable: true,
+    });
+    let recorder = null;
+    class MockRecorder {
+      constructor(streamArg, options) {
+        this.stream = streamArg;
+        this.state = "inactive";
+        recorder = this;
+      }
+      start() {
+        this.state = "recording";
+      }
+      stop() {
+        this.state = "inactive";
+        this.ondataavailable?.({
+          data: new Blob(["audio-bytes"], { type: "audio/webm" }),
+        });
+        this.onstop?.();
+      }
+    }
+    vi.stubGlobal("MediaRecorder", MockRecorder);
+    class FailingAudioContext {
+      async decodeAudioData() {
+        throw new Error("undecodable");
+      }
+      async close() {}
+    }
+    vi.stubGlobal("AudioContext", FailingAudioContext);
+
+    render(<JourneyPanel />);
+    const dictate = screen.getByRole("button", { name: /dictate/i });
+    fireEvent.pointerDown(dictate);
+    await screen.findByText(/listening/i);
+    fireEvent.pointerUp(dictate);
+    expect(
+      await screen.findByText(/could not transcribe that audio/i)
+    ).toBeTruthy();
+    expect(fetch).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 
