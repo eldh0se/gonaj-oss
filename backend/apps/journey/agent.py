@@ -929,20 +929,26 @@ def _resolve_end(text, tracker, exclude_ids=None):
     return groups, None, exact
 
 
+_INTENT_KEEP = re.compile(r"\bKEEP\b", re.IGNORECASE)
 _INTENT_REJECT = re.compile(r"\bREJECT\b", re.IGNORECASE)
+_INTENT_ACCEPT = re.compile(r"\bACCEPT\b", re.IGNORECASE)
 _INTENT_IDS = re.compile(r"\d+")
 
 
 def _intent_check_groups(end_text, groups, tracker):
-    """Model intent check for inexact (fallback) groups.
+    """Model intent check for inexact (fallback) groups as a place allowlist.
 
-    Sends the top 5 groups with token scores to the model and asks it to
-    reject on direction or name mismatch (for example North vs South, or
-    a different station name). The model replies ``REJECT <ids...>`` with
-    rejected member ids, or ``ACCEPT`` when the groups match the intent.
-    Returns (accepted, rejected_ids).
+    Sends the top 5 groups with token scores to the model. The model must
+    return ``KEEP <ids>`` listing only members that are the same place the
+    passenger asked for, or ``REJECT <ids>`` for members that are a
+    different place (token overlap alone never proves sameness). Only KEEP
+    ids are kept; every other listed member is dropped. A bare ``ACCEPT``
+    keeps nothing unless ids are listed. When two groups are the same
+    place, the model keeps both so matrix ranking can choose between them.
+    Returns (kept_ids, dropped_ids), both drawn from the listed members.
     """
     top = list(groups or [])[:5]
+    member_ids = set(_member_ids(top))
     lines = []
     for group in top:
         members = ", ".join(
@@ -957,18 +963,22 @@ def _intent_check_groups(end_text, groups, tracker):
         )
     prompt = (
         f"The passenger asked for '{end_text}'. The place search was "
-        "inexact (token overlap, exact=False). Top candidates with scores:\n"
+        "inexact (token overlap, exact=False): similar names may be "
+        "different places. Top candidates with scores:\n"
         + "\n".join(lines)
-        + "\nReply with ACCEPT when a candidate matches the passenger's "
-        "intent, or REJECT <member ids> listing every candidate whose "
-        "direction (North/South/East/West) or station name mismatches "
-        "the request."
+        + "\nKeep ONLY the same place the passenger asked for. Reply with "
+        "KEEP <member ids> listing only members that are the same place, "
+        "or REJECT <member ids> for members that are a different place. "
+        "A bare ACCEPT keeps nothing unless ids are listed. "
+        "When two groups are the same place, keep both."
     )
     messages = [
         {
             "role": "system",
-            "content": "You check place-search intent. Reject on direction "
-            "or name mismatch. Reply ACCEPT or REJECT <member ids>.",
+            "content": "You check place identity. Keep only the same place "
+            "the passenger asked for; reject any different place even with "
+            "token overlap. Reply KEEP <member ids> for same-place members "
+            "only, or REJECT <member ids> for different places.",
         },
         {"role": "user", "content": prompt},
     ]
@@ -984,44 +994,45 @@ def _intent_check_groups(end_text, groups, tracker):
         message = _model_turn(messages)
     except Exception:
         logger.debug(
-            "journey agent intent-check end=%r decision=accept(model-error)",
+            "journey agent intent-check end=%r decision=keep-all(model-error)",
             end_text,
         )
-        return True, []
+        return sorted(member_ids), []
     content = getattr(message, "content", None) or ""
-    if not _INTENT_REJECT.search(content):
-        logger.debug(
-            "journey agent intent-check end=%r reply=%r decision=accept",
-            end_text,
-            _short(content),
-        )
-        return True, []
-    member_ids = set(_member_ids(top))
-    rejected = [
+    listed = [
         int(value)
         for value in _INTENT_IDS.findall(content)
         if int(value) in member_ids
     ]
-    if not rejected:
-        rejected = sorted(member_ids)
+    if _INTENT_KEEP.search(content):
+        kept = listed
+    elif _INTENT_REJECT.search(content):
+        kept = sorted(member_ids - set(listed)) if listed else []
+    elif _INTENT_ACCEPT.search(content):
+        kept = listed
+    else:
+        kept = sorted(member_ids)
+    dropped = sorted(member_ids - set(kept))
     logger.debug(
-        "journey agent intent-check end=%r reply=%r decision=reject ids=%s",
+        "journey agent intent-check end=%r reply=%r decision=keep ids=%s drop ids=%s",
         end_text,
         _short(content),
-        rejected,
+        kept,
+        dropped,
     )
-    return False, rejected
+    return kept, dropped
 
 
 def _resolve_with_retry(text, tracker, max_attempts=MAX_RESOLVE_ATTEMPTS):
     """Resolve one end, retrying inexact hits via model intent check.
 
     Exact (icontains) hits return immediately. Inexact fallback groups go
-    to the model (top 5 with scores); on REJECT the named member ids join
-    the excluded set and search_places retries with exclude_ids. Stops
-    after max_attempts, an empty result, or an exact match. Returns
-    (groups, problem, exact, excluded) where problem is None on usable
-    groups, else ("empty",), ("zoom_in", detail), or ("rejected",).
+    to the model (top 5 with scores) as a same-place allowlist: only KEEP
+    ids are kept and every other listed member joins the excluded set,
+    then search_places retries with exclude_ids. Stops after max_attempts,
+    an empty result, or an exact match. Returns (groups, problem, exact,
+    excluded) where problem is None on usable groups, else ("empty",),
+    ("zoom_in", detail), or ("rejected",).
     """
     excluded = []
     excluded_set = set()
@@ -1054,18 +1065,18 @@ def _resolve_with_retry(text, tracker, max_attempts=MAX_RESOLVE_ATTEMPTS):
             )
             return groups, None, True, excluded
         last_groups, last_exact = groups, exact
-        accepted, rejected = _intent_check_groups(text, groups, tracker)
-        if accepted:
+        kept, dropped = _intent_check_groups(text, groups, tracker)
+        if set(kept) >= set(_member_ids(groups)):
             logger.debug(
-                "journey agent retry end=%r attempt=%d decision=intent-accepted",
+                "journey agent retry end=%r attempt=%d decision=allowlist-kept-all",
                 text,
                 attempt,
             )
             return groups, None, False, excluded
-        fresh = [rid for rid in rejected if rid not in excluded_set]
+        fresh = [rid for rid in dropped if rid not in excluded_set]
         if not fresh:
             logger.debug(
-                "journey agent retry end=%r attempt=%d decision=intent-rejected-no-new-ids stop",
+                "journey agent retry end=%r attempt=%d decision=allowlist-no-new-drops stop",
                 text,
                 attempt,
             )
@@ -1378,7 +1389,7 @@ def _fresh_matrix_answer(question, tracker):
 
     Exact (icontains) ends resolve straight to the matrix flow. Inexact
     (fallback, exact False) ends never auto-answer: the top 5 groups with
-    scores go to the model for a direction/name intent check, rejects
+    scores go to the model as a same-place allowlist, dropped members
     join the excluded set, and search_places retries with exclude_ids
     (see _resolve_with_retry). Stops after MAX_RESOLVE_ATTEMPTS, an empty
     result, or an exact match, then refuses or picks per FR-007.

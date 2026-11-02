@@ -600,11 +600,9 @@ class RejectRetryTests(TestCase):
             def __call__(self, **kwargs):
                 self.n += 1
                 calls.append(kwargs.get("messages", []))
-                if self.n == 1:
-                    return _Response(
-                        _Message(content=f"REJECT {north_id} direction mismatch north vs south")
-                    )
-                return _Response(_Message(content="ACCEPT direction and name match"))
+                return _Response(
+                    _Message(content=f"KEEP {south_id} same place")
+                )
 
         seen_searches = []
         import apps.journey.agent as agent_module
@@ -644,6 +642,7 @@ class RejectRetryTests(TestCase):
     def test_loop_stops_after_bound(self):
         from apps.journey.agent import run_journey
 
+        south_id = self.south.id
         north_id = self.north_station.id
         model_calls = []
         search_calls = []
@@ -659,7 +658,9 @@ class RejectRetryTests(TestCase):
             def __call__(self, **kwargs):
                 model_calls.append(kwargs.get("messages", []))
                 return _Response(
-                    _Message(content=f"REJECT {north_id} name mismatch")
+                    _Message(
+                        content=f"REJECT {south_id} {north_id} different place"
+                    )
                 )
 
         agent_module._TOOL_FUNCTIONS["search_places"] = counting_search_places
@@ -677,3 +678,171 @@ class RejectRetryTests(TestCase):
         self.assertLessEqual(len(search_calls), 6)
         self.assertLessEqual(len(model_calls), 3)
         self.assertGreater(len(model_calls), 0)
+
+
+class AllowlistTests(TestCase):
+    """Same-place allowlist: KEEP same-place members only, drop the rest."""
+
+    @classmethod
+    def setUpTestData(cls):
+        _, run = f.make_snapshot(label="factory-allowlist")
+        master = f.make_master(
+            run, 51, "AllowLoop", operator="KSRTC", network="Kochi"
+        )
+        cls.aluva = f.make_stop(run, 951, "Aluva", 10.11, 76.35)
+        cls.south1 = f.make_stop(run, 952, "South Railway", 9.97, 76.28)
+        cls.south2 = f.make_stop(run, 953, "South Railway", 10.05, 76.35)
+        cls.north_station = f.make_stop(
+            run, 954, "North Railway Station", 9.96, 76.27
+        )
+        cls.ankamaly_south = f.make_stop(
+            run, 955, "Ankamaly South", 10.07, 76.35
+        )
+        cls.route1 = f.make_route(run, 956, "Aluva-South")
+        f.link_master(run, master, cls.route1, 1)
+        f.link_stop(run, cls.route1, cls.aluva, 1)
+        f.link_stop(run, cls.route1, cls.south1, 2)
+
+    def _patch_provider(self, scripted):
+        import apps.journey.providers.meta as provider_module
+
+        real = provider_module.complete_with_tools
+        provider_module.complete_with_tools = scripted
+        self.addCleanup(setattr, provider_module, "complete_with_tools", real)
+
+    def _spy_search_places(self, seen):
+        import apps.journey.agent as agent_module
+
+        real_fn = agent_module._TOOL_FUNCTIONS["search_places"]
+
+        def spy(*args, **kwargs):
+            seen.append(kwargs)
+            return real_fn(*args, **kwargs)
+
+        agent_module._TOOL_FUNCTIONS["search_places"] = spy
+        self.addCleanup(
+            agent_module._TOOL_FUNCTIONS.__setitem__, "search_places", real_fn
+        )
+
+    def test_allowlist_keeps_same_place_drops_overlaps(self):
+        from apps.journey.agent import run_journey
+
+        south1, south2 = self.south1.id, self.south2.id
+        north, ankamaly = self.north_station.id, self.ankamaly_south.id
+
+        class KeepSamePlace:
+            def __init__(self):
+                self.n = 0
+
+            def __call__(self, **kwargs):
+                self.n += 1
+                return _Response(
+                    _Message(content=f"KEEP {south1} {south2} same place")
+                )
+
+        seen = []
+        self._spy_search_places(seen)
+        self._patch_provider(KeepSamePlace())
+
+        payload, tools_used = run_journey(
+            question="How do I get from Aluva to South Railway Station?"
+        )
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["alighting_stop"]["id"], south1)
+        excluded = [
+            kw.get("exclude_ids", []) for kw in seen if kw.get("exclude_ids")
+        ]
+        self.assertTrue(excluded, "retry never passed exclude_ids")
+        dropped = excluded[-1]
+        self.assertIn(north, dropped)
+        self.assertIn(ankamaly, dropped)
+        self.assertNotIn(south1, dropped)
+        self.assertNotIn(south2, dropped)
+
+    def test_two_same_place_groups_both_kept_for_ranking(self):
+        from apps.journey.agent import run_journey
+
+        south1, south2 = self.south1.id, self.south2.id
+        matrix_to_ids = []
+        import apps.journey.agent as agent_module
+
+        real_matrix = agent_module._TOOL_FUNCTIONS["find_routes_matrix"]
+
+        def spy_matrix(*args, **kwargs):
+            matrix_to_ids.append(list(kwargs.get("to_ids", [])))
+            return real_matrix(*args, **kwargs)
+
+        agent_module._TOOL_FUNCTIONS["find_routes_matrix"] = spy_matrix
+        self.addCleanup(
+            agent_module._TOOL_FUNCTIONS.__setitem__,
+            "find_routes_matrix",
+            real_matrix,
+        )
+
+        class KeepBoth:
+            def __init__(self):
+                self.n = 0
+
+            def __call__(self, **kwargs):
+                self.n += 1
+                if self.n == 1:
+                    return _Response(
+                        _Message(content=f"KEEP {south1} {south2} same place")
+                    )
+                return _Response(
+                    _Message(content=f"ACCEPT {south1} {south2} same place")
+                )
+
+        seen = []
+        self._spy_search_places(seen)
+        self._patch_provider(KeepBoth())
+
+        payload, _ = run_journey(
+            question="How do I get from Aluva to South Railway Station?"
+        )
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["alighting_stop"]["id"], south1)
+        self.assertTrue(
+            any(
+                south1 in to_ids and south2 in to_ids
+                for to_ids in matrix_to_ids
+            ),
+            "both same-place groups must reach matrix ranking",
+        )
+        excluded = [
+            kw.get("exclude_ids", []) for kw in seen if kw.get("exclude_ids")
+        ]
+        self.assertTrue(excluded, "retry never passed exclude_ids")
+        self.assertNotIn(south1, excluded[-1])
+        self.assertNotIn(south2, excluded[-1])
+
+    def test_bare_accept_keeps_nothing(self):
+        from apps.journey.agent import run_journey
+
+        member_ids = {
+            self.south1.id,
+            self.south2.id,
+            self.north_station.id,
+            self.ankamaly_south.id,
+        }
+
+        class BareAccept:
+            def __call__(self, **kwargs):
+                return _Response(_Message(content="ACCEPT"))
+
+        seen = []
+        self._spy_search_places(seen)
+        self._patch_provider(BareAccept())
+
+        payload, _ = run_journey(
+            question="How do I get from Aluva to South Railway Station?"
+        )
+        self.assertIn(payload["status"], ("refuse", "disambiguate"))
+        excluded = [
+            kw.get("exclude_ids", []) for kw in seen if kw.get("exclude_ids")
+        ]
+        self.assertTrue(excluded, "retry never passed exclude_ids")
+        self.assertTrue(
+            member_ids <= set(excluded[-1]),
+            "bare ACCEPT must drop every listed member",
+        )

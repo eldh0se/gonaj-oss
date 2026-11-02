@@ -136,6 +136,30 @@ feature's dev-notes (`dev-notes/agent_loop.md`, `dev-notes/agent_tools.md`,
     exact picks still need a leaf verifier; direct search stays available
     as a user-invoked path).
 
+## Decision 7: Inexact intent check as a same-place allowlist (FR-013)
+
+- **Decision**: Inexact (`exact` False) ends never auto-answer. The top 5
+  groups with scores go to the model as a same-place allowlist with generic
+  place-identity wording: keep only the same place the passenger asked for,
+  reject any different place even with token overlap. The model returns
+  `KEEP <ids>` for same-place members only, or `REJECT <ids>` for different
+  places; only `KEEP` ids are kept and every other listed member is dropped
+  (a bare `ACCEPT` keeps nothing unless ids are listed). When two groups are
+  the same place, both are kept for matrix ranking. Dropped members join the
+  excluded set and `search_places` retries with `exclude_ids`, bounded at 3
+  attempts per end, then refuses or picks per FR-007.
+- **Rationale**: Token overlap alone never proves sameness: similar names
+  routinely belong to different places, so a reject-list tied to any one
+  naming pattern (compass words, station suffixes, or any other similarity)
+  would miss the next near-miss. A keep-list built on place identity is
+  generic: the model keeps what matches the request and everything else is
+  dropped, so no per-pattern logic can go stale.
+- **Alternatives considered**:
+  - Reject-list with per-pattern wording: rejected — each new similarity
+    shape needs new wording; the allowlist covers all of them with one rule.
+  - Auto-answer the top-ranked fallback group: rejected — the top score can
+    still be the wrong place; FR-013 forbids auto-answering inexact ends.
+
 ## Deferred (out of scope, noted for the next feature)
 
 - Location variant (loop Step 1b: origin ids from `nearby_stops` instead of

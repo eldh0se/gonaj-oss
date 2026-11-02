@@ -57,9 +57,11 @@ input); no new services, queues, or routing engines; response `meta`
 `execute_tool`/`_direct_tool`; name search is two-stage (`exact` True on
 `icontains` hit, `exact` False plus token scores on overlap fallback ranked
 by shared count desc, exact-phrase bonus, fewer extra tokens, name, id);
-`exclude_ids` skips rejected candidates; `MAX_TOOL_TURNS` (4), `pos_from <
-pos_to` verifier, 200-pair cap, 5-destination cap, and FR-011 no-bypass stay
-unchanged
+inexact ends go to a same-place model allowlist (`KEEP <ids>` for same-place
+members only; only listed ids are kept and the rest are dropped; a bare
+`ACCEPT` keeps nothing unless ids are listed) with dropped members retried
+via `exclude_ids`; `MAX_TOOL_TURNS` (4), `pos_from < pos_to` verifier,
+200-pair cap, 5-destination cap, and FR-011 no-bypass stay unchanged
 
 **Scale/Scope**: ≤100 stops per `search_places` side → ≤200 tested pairs;
 ≤5 destinations cited; ≤3 walk-note mates per end + overflow count
