@@ -6,6 +6,7 @@ Written first; FAILS before T020.
 from types import SimpleNamespace
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.journey.providers import meta as provider
@@ -178,3 +179,29 @@ class TranscribeTests(ApiTestCase):
         response = self.client.get("/api/v1/journey/transcribe/")
         self.assertEqual(response.status_code, 405)
         self.assertIn("detail", response.json())
+
+    @override_settings(
+        REST_FRAMEWORK={
+            "EXCEPTION_HANDLER": (
+                "apps.transport.api.errors.plain_exception_handler"
+            ),
+            "DEFAULT_THROTTLE_RATES": {
+                "transport_minute": "180/min",
+                "transport_day": "5000/day",
+                "journey_min": "60/min",
+                "journey_day": "1500/day",
+                "transcribe_min": "1/min",
+                "transcribe_day": "1000/day",
+            },
+        }
+    )
+    def test_denied_upload_makes_no_transcribe_call(self):
+        stub = StubVoice(text="How do I get there?")
+        provider.transcribe_audio = stub
+        first = self.post_audio()
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(stub.calls, 1)
+        denied = self.post_audio()
+        self.assertEqual(denied.status_code, 429)
+        self.assertIn("Retry-After", denied)
+        self.assertEqual(stub.calls, 1)

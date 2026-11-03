@@ -24,6 +24,19 @@ def env(name, default=_MISSING):
     return value
 
 
+def _env_rate(name, default):
+    """Throttle rate override; missing or empty falls back to ``default``."""
+    return env(name, "") or default
+
+
+def _env_int(name, default):
+    """Integer override; missing, empty, or unparseable falls back to ``default``."""
+    try:
+        return int(env(name, ""))
+    except (TypeError, ValueError):
+        return default
+
+
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 
 DEBUG = env("DJANGO_DEBUG", "1") == "1"
@@ -170,6 +183,10 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "transport_minute": "180/min",
         "transport_day": "5000/day",
+        "journey_min": _env_rate("JOURNEY_THROTTLE_MINUTE", "60/min"),
+        "journey_day": _env_rate("JOURNEY_THROTTLE_DAY", "1500/day"),
+        "transcribe_min": _env_rate("TRANSCRIBE_THROTTLE_MINUTE", "20/min"),
+        "transcribe_day": _env_rate("TRANSCRIBE_THROTTLE_DAY", "300/day"),
     },
 }
 
@@ -184,6 +201,14 @@ CACHES = {
     }
 }
 TRANSPORT_TRUSTED_PROXY = env("TRANSPORT_TRUSTED_PROXY", "")
+
+# Abuse budgets and request size caps (specs/015-api-abuse-protection).
+# All env-overridable with safe compiled-in defaults; the service never
+# starts unbounded. See docs/deployment.md for production tuning.
+JOURNEY_MAX_QUESTION_CHARS = _env_int("JOURNEY_MAX_QUESTION_CHARS", 500)
+JOURNEY_MAX_HISTORY_TURNS = _env_int("JOURNEY_MAX_HISTORY_TURNS", 10)
+JOURNEY_MAX_TURN_CHARS = _env_int("JOURNEY_MAX_TURN_CHARS", 500)
+JOURNEY_MAX_CONTEXT_BYTES = _env_int("JOURNEY_MAX_CONTEXT_BYTES", 8192)
 
 # Journey helper model configuration (specs/004-journey-agent, FR-019).
 # The key stays server-side only: it appears in no response, log, or

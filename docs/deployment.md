@@ -42,3 +42,23 @@ flowchart LR
   Caddy --> FE[static dist/]
   BE --> DB[(PostGIS tuned)]
 ```
+
+## Production hardening (abuse budgets)
+
+Per-IP throttle budgets and request size caps are enforced in the app and tuned
+entirely through env (see [.env.prod.example](../.env.prod.example));
+`DEBUG` stays off and `ALLOWED_HOSTS` stays set to the serving domain(s).
+
+- `TRANSPORT_TRUSTED_PROXY` stays `caddy` (the known proxy only). Per-IP identity
+  follows the forwarded address solely on that trust; never wildcard it, or any
+  client can spoof its IP and dodge budgets.
+- Cloudflare and Caddy stay dumb pipes: no edge rate limiting. The app budgets
+  (`journey_min/day`, `transcribe_min/day`) are the single source of truth, so
+  all rejections stay in the API's plain-language 429/400 shapes.
+- Budgets are per public IP. Mobile users in Kochi share addresses behind CGNAT,
+  so one heavy sharer can consume the shared slice (notably the 1500/day journey
+  budget). Keep the defaults, watch 429 rates per endpoint, and tune via env —
+  tighten against bursty abuse first, raise budgets only if legitimate users get
+  throttled.
+- Defaults: journey 60/min + 1500/day, transcribe 20/min + 300/day; caps: question
+  500 chars, history 10 turns × 500 chars, context 8KB, audio 5MB WAV-only.

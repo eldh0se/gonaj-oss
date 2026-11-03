@@ -321,8 +321,12 @@ class JourneyTests(ApiTestCase):
                 "apps.transport.api.errors.plain_exception_handler"
             ),
             "DEFAULT_THROTTLE_RATES": {
-                "transport_minute": "1/min",
+                "transport_minute": "180/min",
                 "transport_day": "5000/day",
+                "journey_min": "1/min",
+                "journey_day": "1000/day",
+                "transcribe_min": "20/min",
+                "transcribe_day": "300/day",
             },
         }
     )
@@ -367,6 +371,134 @@ class JourneyTests(ApiTestCase):
             "Too many requests. Please wait a moment and try again.",
         )
         self.assertIn("Retry-After", throttled.headers)
+
+    @override_settings(
+        REST_FRAMEWORK={
+            "EXCEPTION_HANDLER": (
+                "apps.transport.api.errors.plain_exception_handler"
+            ),
+            "DEFAULT_THROTTLE_RATES": {
+                "transport_minute": "180/min",
+                "transport_day": "5000/day",
+                "journey_min": "1000/min",
+                "journey_day": "10000/day",
+                "transcribe_min": "20/min",
+                "transcribe_day": "300/day",
+            },
+        }
+    )
+    def test_overlong_question_rejected_without_model_call(self):
+        stub = StubModel(error=Exception("boom"))
+        provider.complete_with_tools = stub
+        response = self.ask({"question": "x" * 501})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("detail", response.json())
+        self.assertEqual(stub.calls, 0)
+
+    def test_overlong_history_rejected_without_model_call(self):
+        stub = StubModel(error=Exception("boom"))
+        provider.complete_with_tools = stub
+        history = [
+            {"role": "user", "content": f"turn {i}"} for i in range(11)
+        ]
+        response = self.ask({"question": "And back?", "history": history})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(stub.calls, 0)
+
+    def test_overlong_history_turn_rejected_without_model_call(self):
+        stub = StubModel(error=Exception("boom"))
+        provider.complete_with_tools = stub
+        history = [{"role": "user", "content": "x" * 501}]
+        response = self.ask({"question": "And back?", "history": history})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(stub.calls, 0)
+
+    def test_overlong_context_rejected_without_model_call(self):
+        stub = StubModel(error=Exception("boom"))
+        provider.complete_with_tools = stub
+        response = self.ask(
+            {"question": "How do I get there?", "context": {"blob": "x" * 9000}}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(stub.calls, 0)
+
+    @override_settings(
+        REST_FRAMEWORK={
+            "EXCEPTION_HANDLER": (
+                "apps.transport.api.errors.plain_exception_handler"
+            ),
+            "DEFAULT_THROTTLE_RATES": {
+                "transport_minute": "180/min",
+                "transport_day": "5000/day",
+                "journey_min": "0/min",
+                "journey_day": "1000/day",
+                "transcribe_min": "20/min",
+                "transcribe_day": "300/day",
+            },
+        }
+    )
+    def test_oversized_beats_throttle_order(self):
+        stub = StubModel(error=Exception("boom"))
+        provider.complete_with_tools = stub
+        response = self.ask({"question": "x" * 501})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(stub.calls, 0)
+
+    @override_settings(
+        REST_FRAMEWORK={
+            "EXCEPTION_HANDLER": (
+                "apps.transport.api.errors.plain_exception_handler"
+            ),
+            "DEFAULT_THROTTLE_RATES": {
+                "transport_minute": "180/min",
+                "transport_day": "5000/day",
+                "journey_min": "1/min",
+                "journey_day": "1000/day",
+                "transcribe_min": "20/min",
+                "transcribe_day": "300/day",
+            },
+        }
+    )
+    def test_rejected_ask_leaves_budget_untouched(self):
+        stub = StubModel(error=Exception("boom"))
+        provider.complete_with_tools = stub
+        rejected = self.ask({"question": "x" * 501})
+        self.assertEqual(rejected.status_code, 400)
+        allowed = self.ask({"question": "How do I get there?"})
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(stub.calls, 1)
+        denied = self.ask({"question": "How do I get there?"})
+        self.assertEqual(denied.status_code, 429)
+
+    @override_settings(
+        REST_FRAMEWORK={
+            "EXCEPTION_HANDLER": (
+                "apps.transport.api.errors.plain_exception_handler"
+            ),
+            "DEFAULT_THROTTLE_RATES": {
+                "transport_minute": "180/min",
+                "transport_day": "5000/day",
+                "journey_min": "1/min",
+                "journey_day": "1000/day",
+                "transcribe_min": "20/min",
+                "transcribe_day": "300/day",
+            },
+        }
+    )
+    def test_journey_denial_makes_no_model_call(self):
+        # "How do I get there?" has no usable from/to ends, so the
+        # deterministic flow falls through to exactly one model turn
+        # (outage fallback here); a from-to question would resolve
+        # without any model call and prove nothing about denial.
+        stub = StubModel(error=Exception("boom"))
+        provider.complete_with_tools = stub
+        first = self.ask({"question": "How do I get there?"})
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(stub.calls, 1)
+        denied = self.ask({"question": "How do I get there?"})
+        self.assertEqual(denied.status_code, 429)
+        self.assertIn("Retry-After", denied)
+        self.assertEqual(stub.calls, 1)
 
 
 class ProofTests(ApiTestCase):

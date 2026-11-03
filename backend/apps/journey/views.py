@@ -10,11 +10,11 @@ from rest_framework.decorators import (
     api_view,
     authentication_classes,
     permission_classes,
-    throttle_classes,
 )
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+import json
 import logging
 import time
 
@@ -23,7 +23,11 @@ from django.conf import settings
 from apps.journey.agent import run_journey
 from apps.journey.providers import meta as provider
 from apps.transport.api.errors import PlainBadRequest
-from apps.transport.api.throttling import READ_THROTTLE_CLASSES
+from apps.transport.api.throttling import (
+    JOURNEY_THROTTLE_CLASSES,
+    TRANSCRIBE_THROTTLE_CLASSES,
+    check_budgets,
+)
 logger = logging.getLogger(__name__)
 
 MAX_AUDIO_BYTES = 5 * 1024 * 1024
@@ -36,10 +40,14 @@ def _bad_request(detail):
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
-@throttle_classes(READ_THROTTLE_CLASSES)
 def journey(request):
     """Ask in everyday words; receive an answer, a disambiguation
-    prompt, or an honest refusal (contracts/journey.md)."""
+    prompt, or an honest refusal (contracts/journey.md).
+
+    Own per-IP budget (015, FR-001), fully detached from the shared
+    read throttles. Shape and size validation runs before the budget
+    check, so rejected requests never consume budget.
+    """
     if not isinstance(request.data, dict):
         raise _bad_request(
             "That journey question does not look right. "
@@ -58,6 +66,10 @@ def journey(request):
             "That journey question does not look right. "
             "Please ask in words and try again."
         )
+    caps_error = _journey_caps_error(question, history, context)
+    if caps_error is not None:
+        raise caps_error
+    check_budgets(request, JOURNEY_THROTTLE_CLASSES)
     payload, _tools_used = run_journey(
         question=question,
         history=history,
@@ -74,6 +86,39 @@ def _request_page(value, default):
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _journey_caps_error(question, history, context):
+    """Plain-language size error, or None when within caps.
+
+    Bounds come from settings (env-overridable, safe compiled
+    defaults). Runs before the budget check so rejected requests
+    consume neither budget nor model quota (015, FR-004/FR-005).
+    """
+    if len(question) > settings.JOURNEY_MAX_QUESTION_CHARS:
+        return _bad_request(
+            "That journey question is too long. "
+            "Please ask it in fewer words and try again."
+        )
+    if len(history) > settings.JOURNEY_MAX_HISTORY_TURNS:
+        return _bad_request(
+            "That conversation history is too long. "
+            "Please start a new question and try again."
+        )
+    max_turn = settings.JOURNEY_MAX_TURN_CHARS
+    for turn in history:
+        content = turn.get("content", "") if isinstance(turn, dict) else ""
+        if len(content) > max_turn:
+            return _bad_request(
+                "One of those history turns is too long. "
+                "Please start a new question and try again."
+            )
+    if len(json.dumps(context)) > settings.JOURNEY_MAX_CONTEXT_BYTES:
+        return _bad_request(
+            "That request carries too much context. "
+            "Please start a new question and try again."
+        )
+    return None
 
 
 def _wav_params(audio):
@@ -133,12 +178,15 @@ def _is_wav_upload(upload, audio):
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
-@throttle_classes(READ_THROTTLE_CLASSES)
 def transcribe(request):
     """Voice input mode only: audio in, editable transcript out.
 
     The audio bytes are used for this call only and never stored:
     not on disk, database, cache, or logs (contracts/transcribe.md).
+
+    Own per-IP budget (015, FR-002), fully detached from the shared
+    read throttles and from journey. Shape and size validation runs
+    before the budget check, so rejected uploads never consume budget.
     """
     upload = request.FILES.get("audio")
     if upload is None:
@@ -164,6 +212,7 @@ def transcribe(request):
         raise PlainBadRequest(
             "We could not transcribe that audio. Please try again."
         )
+    check_budgets(request, TRANSCRIBE_THROTTLE_CLASSES)
     started = time.monotonic()
     try:
         result = provider.transcribe_audio(
