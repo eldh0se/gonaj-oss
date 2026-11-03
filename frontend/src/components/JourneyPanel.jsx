@@ -6,8 +6,10 @@
 // distinctly labelled unverified with inline /routes/:id evidence
 // links; nothing is stored anywhere.
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { getConnectivity, listStops } from "../api/client.js";
 import { postJourney, postTranscribe } from "../api/journey.js";
+import { Pager } from "./ResultsList.jsx";
 
 const WAV_SAMPLE_RATE = 24000;
 
@@ -177,6 +179,66 @@ function boundsFor(candidates, groups) {
   };
 }
 
+function JourneyOptionCards({ options, filter, walkNote }) {
+  const term = filter.trim().toLowerCase();
+  function matches(option) {
+    const haystack = [
+      option?.route?.name,
+      option?.boarding_stop?.name,
+      option?.alighting_stop?.name,
+      option?.operator,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(term);
+  }
+  const visible = term ? options.filter(matches) : options;
+  if (visible.length === 0 && term) {
+    return <p>No loaded options match this filter.</p>;
+  }
+  return (
+    <ul className="gonaj-journey-options">
+      {visible.map((option) => {
+        const route = option.route ?? {};
+        const from = option.boarding_stop ?? {};
+        const to = option.alighting_stop ?? {};
+        const notes = [
+          option.boarding_hint,
+          walkNote(
+            from.name,
+            option.also_nearby_boarding,
+            option.overflow_nearby_boarding
+          ),
+          walkNote(
+            to.name,
+            option.also_nearby,
+            option.overflow_nearby
+          ),
+        ].filter(Boolean);
+        return (
+          <li
+            key={`${route.id}-${from.id}-${to.id}`}
+            className="gonaj-journey-option"
+          >
+            <Link to={route.evidence}>{route.name}</Link>
+            <p>
+              {from.name} to {to.name}
+            </p>
+            <p>
+              {option.operator}
+              {option.network ? ` · ${option.network}` : ""}
+            </p>
+            {notes.map((note) => (
+              <p key={note}>{note}</p>
+            ))}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export default function JourneyPanel({
   onShowCandidates,
   chooseRef,
@@ -195,6 +257,22 @@ export default function JourneyPanel({
   const [toText, setToText] = useState("");
   const [toStop, setToStop] = useState(null);
   const [direct, setDirect] = useState({ status: "idle" });
+  const [cards, setCards] = useState([]);
+  const [paging, setPaging] = useState(null);
+  const [filter, setFilter] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
+  const lastAskRef = useRef(null);
+  const pagingRef = useRef(null);
+
+  function walkNote(endName, mates, overflow) {
+    const list = mates ?? [];
+    if (list.length === 0 && !overflow) return "";
+    const bits = list
+      .map((mate) => `${mate.name} (${mate.walk_m}m walk)`)
+      .join(", ");
+    const extra = overflow ? ` plus ${overflow} more within 150m` : "";
+    return `Also near ${endName}: ${bits}${extra}.`;
+  }
 
   async function startDictation() {
     if (
@@ -367,6 +445,16 @@ export default function JourneyPanel({
     directAbort.current?.abort();
     setDirect({ status: "idle" });
     setMapHelpDismissed(false);
+    setCards([]);
+    setPaging(null);
+    pagingRef.current = null;
+    setFilter("");
+    setLoadingMore(false);
+    lastAskRef.current = {
+      wording,
+      history: history ?? [],
+      context: context ?? {},
+    };
     const controller = new AbortController();
     askAbort.current = controller;
     setState({ status: "loading" });
@@ -381,6 +469,18 @@ export default function JourneyPanel({
       );
       if (body.status === "ok") {
         hideCandidates();
+        const opts = Array.isArray(body.options) ? body.options : [];
+        setCards(opts);
+        const info = Array.isArray(body.options)
+          ? {
+              page: body.page ?? 1,
+              total_pages: body.total_pages ?? 1,
+              page_size: body.page_size ?? opts.length,
+              total_options: body.total_options ?? opts.length,
+            }
+          : null;
+        setPaging(info);
+        pagingRef.current = info;
         setState({ status: "ok", payload: body });
       } else if (body.status === "disambiguate") {
         setState({ status: "disambiguate", payload: body });
@@ -399,6 +499,46 @@ export default function JourneyPanel({
           message: (err && err.detail) || CANNOT_ANSWER_NOW,
         });
       }
+    }
+  }
+
+  async function goPage(page) {
+    const last = lastAskRef.current;
+    const info = pagingRef.current;
+    if (!last || !info || loadingMore) return;
+    if (page < 1 || page > info.total_pages || page === info.page) return;
+    const controller = new AbortController();
+    askAbort.current = controller;
+    setLoadingMore(true);
+    try {
+      const body = await postJourney(
+        {
+          question: last.wording,
+          history: last.history,
+          context: last.context,
+        },
+        {
+          signal: controller.signal,
+          page,
+          page_size: info.page_size,
+        }
+      );
+      if (body.status === "ok" && Array.isArray(body.options)) {
+        setCards(body.options);
+        setFilter("");
+        const next = {
+          page: body.page ?? page,
+          total_pages: body.total_pages ?? info.total_pages,
+          page_size: body.page_size ?? info.page_size,
+          total_options: body.total_options ?? info.total_options,
+        };
+        setPaging(next);
+        pagingRef.current = next;
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -508,9 +648,9 @@ export default function JourneyPanel({
           <ul className="gonaj-journey-routes">
             {(direct.routes ?? []).map((route) => (
               <li key={route.id}>
-                <a href={`/routes/${route.id}`}>
+                <Link to={`/routes/${route.id}`}>
                   {route.name ?? `Route ${route.id}`}
-                </a>
+                </Link>
               </li>
             ))}
           </ul>
@@ -528,21 +668,59 @@ export default function JourneyPanel({
 
         {state.status === "ok" && (
           <article aria-label="Journey answer">
-            <p className="gonaj-unverified">Unverified AI answer</p>
+            <p className="gonaj-unverified">
+              Journey agent can make mistakes, Check important info
+            </p>
+            {state.payload.meta?.model &&
+              state.payload.meta.model !== "none" && (
+                <p>Answer generated using {state.payload.meta.model}.</p>
+              )}
             <p>{state.payload.answer}</p>
-            <ul className="gonaj-journey-routes">
-              {(state.payload.routes ?? []).map((route) => (
-                <li key={route.id}>
-                  <a href={route.evidence}>{route.name}</a>
-                </li>
-              ))}
-            </ul>
+            {Array.isArray(state.payload.options) ? (
+              <>
+                <div className="gonaj-journey-filter">
+                  <label htmlFor="gonaj-journey-filter">Filter options</label>
+                  <input
+                    id="gonaj-journey-filter"
+                    type="text"
+                    value={filter}
+                    onChange={(event) => setFilter(event.target.value)}
+                    placeholder="Stop, service, or operator"
+                    autoComplete="off"
+                  />
+                </div>
+                <JourneyOptionCards
+                  options={cards}
+                  filter={filter}
+                  walkNote={walkNote}
+                />
+                {paging && paging.total_pages > 1 && (
+                  <Pager
+                    kind="options"
+                    list={{
+                      page: paging.page,
+                      totalPages: paging.total_pages,
+                      count: paging.total_options,
+                    }}
+                    onPage={goPage}
+                  />
+                )}
+              </>
+            ) : (
+              <ul className="gonaj-journey-routes">
+                {(state.payload.routes ?? []).map((route) => (
+                  <li key={route.id}>
+                    <Link to={route.evidence}>{route.name}</Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </article>
         )}
 
         {state.status === "disambiguate" && (
           <div aria-label="Choose a stop">
-            <p className="gonaj-unverified">Unverified AI answer</p>
+            <p className="gonaj-unverified">Journey agent can make mistakes, Check important info</p>
             <p>{state.payload.message}</p>
             {!mapHelpDismissed && (
               <p className="gonaj-journey-map-hint">
@@ -580,7 +758,7 @@ export default function JourneyPanel({
 
         {(state.status === "refuse" || state.status === "error") && (
           <div aria-label="Journey helper notice">
-            <p className="gonaj-unverified">Unverified AI answer</p>
+            <p className="gonaj-unverified">Journey agent can make mistakes, Check important info</p>
             <p role="status">{state.message}</p>
           </div>
         )}

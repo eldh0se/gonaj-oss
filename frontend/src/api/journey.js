@@ -52,12 +52,14 @@ async function requestJson(path, body, { signal } = {}) {
   return data;
 }
 
-export function postJourney({ question, history, context } = {}, opts) {
-  return requestJson(
-    "/journey/",
-    { question, history: history ?? [], context: context ?? {} },
-    opts
-  );
+export function postJourney(
+  { question, history, context } = {},
+  { signal, page, page_size } = {}
+) {
+  const body = { question, history: history ?? [], context: context ?? {} };
+  if (page !== undefined) body.page = page;
+  if (page_size !== undefined) body.page_size = page_size;
+  return requestJson("/journey/", body, { signal });
 }
 
 export async function postTranscribe(

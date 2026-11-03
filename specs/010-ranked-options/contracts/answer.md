@@ -2,6 +2,11 @@
 
 **Base**: [004 journey.md](../../004-journey-agent/contracts/journey.md), [008 selection.md](../../008-journey-selection-resolve/contracts/selection.md) | **Date**: 2026-10-31
 
+> Superseded by 014: `option_groups` were replaced with a flat paged
+> `options` array — see
+> [014 answer-page.md](../../014-flat-journey-results/contracts/answer-page.md).
+> This document is kept as the record of the 010 shape.
+
 Additive only. `status`, `answer`, `boarding_stop`, `alighting_stop`, `routes`, and `meta` are unchanged; the prose `answer` enumerates the groups so old renderers keep working.
 
 ## `ok` response gains `option_groups` and `destinations`

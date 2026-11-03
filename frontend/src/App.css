@@ -608,6 +608,47 @@
   background: var(--gonaj-sage);
 }
 
+.gonaj-journey-filter {
+  margin: 0 0 0.4rem;
+}
+
+.gonaj-journey-filter > label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gonaj-muted);
+  margin: 0 0 0.2rem;
+}
+
+.gonaj-journey-filter > input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 14px;
+  color: var(--gonaj-ink);
+  background: var(--gonaj-surface);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  padding: 0.45rem 0.7rem;
+}
+
+.gonaj-journey-filter > input:focus-visible {
+  outline: 2px solid var(--gonaj-green);
+  outline-offset: -2px;
+}
+
+.gonaj-journey-options li {
+  margin: 0 0 0.4rem;
+  background: var(--gonaj-surface);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  padding: 0.45rem 0.7rem;
+}
+
+.gonaj-journey-options li p:last-child {
+  margin-bottom: 0;
+}
+
 .gonaj-journey a {
   font-size: 14px;
   color: var(--gonaj-green-dark);

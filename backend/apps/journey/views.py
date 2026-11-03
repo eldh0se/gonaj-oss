@@ -59,9 +59,21 @@ def journey(request):
             "Please ask in words and try again."
         )
     payload, _tools_used = run_journey(
-        question=question, history=history, context=context
+        question=question,
+        history=history,
+        context=context,
+        page=_request_page(request.data.get("page"), 1),
+        page_size=_request_page(request.data.get("page_size"), 5),
     )
     return Response(payload)
+
+
+def _request_page(value, default):
+    """Coerce a paging param to int, falling back to ``default``."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _wav_params(audio):
