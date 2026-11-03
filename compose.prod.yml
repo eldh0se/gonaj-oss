@@ -1,0 +1,43 @@
+# Production overlay for Gonaj (single 1GB VPS).
+# Dev database stays in compose.yml; this file is only used with:
+# docker compose -f compose.prod.yml up -d --build
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "effective_cache_size=512MB", "-c", "max_connections=30"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gonaj}
+      POSTGRES_USER: ${POSTGRES_USER:-gonaj}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set_POSTGRES_PASSWORD_in_env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gonaj} -d ${POSTGRES_DB:-gonaj}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    env_file: .env.prod
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    image: caddy:2-alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv/frontend:ro
+      - caddy_data:/data
+    depends_on: [backend]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
