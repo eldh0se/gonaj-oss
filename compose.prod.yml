@@ -23,6 +23,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
     env_file: .env.prod
+    volumes:
+      - staticfiles:/app/staticfiles
     depends_on:
       db:
         condition: service_healthy
@@ -34,6 +36,7 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./frontend/dist:/srv/frontend:ro
+      - staticfiles:/srv/static:ro
       - caddy_data:/data
     depends_on: [backend]
     restart: unless-stopped
@@ -41,3 +44,4 @@ services:
 volumes:
   pgdata:
   caddy_data:
+  staticfiles:
