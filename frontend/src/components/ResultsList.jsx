@@ -24,7 +24,7 @@ function groupStopsByName(stops) {
 
 const emptyList = { items: [], page: 1, totalPages: 1, count: 0 };
 
-function Pager({ kind, list, onPage }) {
+export function Pager({ kind, list, onPage }) {
   const { page, totalPages, count } = list;
   return (
     <div className="gonaj-pager">

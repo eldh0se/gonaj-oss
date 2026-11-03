@@ -57,12 +57,15 @@ the plain-language `400`.
   `local-fallback`), `meta.latency_ms` the measured producing
   latency.
 
-Ranked answers (010) add two fields, documented in full in
-`specs/010-ranked-options/contracts/answer.md`: `option_groups`
-(per-operator ranked options; unknown operator sorts last as
-`"Other services"`) and `destinations` (up to 5 reachable member
-stops, each evidence-linked). The prose `answer` enumerates the
-groups, so old renderers keep working.
+Ranked answers (010, reshaped flat by 014) add fields documented
+in full in
+`specs/014-flat-journey-results/contracts/answer-page.md`:
+`options` (one relevance-ranked page; each option carries its
+`operator` and route `network`; unknown operator sorts last as
+`"Other services"`), paging (`page`, `page_size`,
+`total_options`, `total_pages`), and `destinations` (up to 5
+reachable member stops, each evidence-linked). The prose `answer`
+is a bounded summary, so old renderers keep working.
 
 ## Disambiguation response — `200`
 

@@ -64,15 +64,17 @@ class RankedTests(ApiTestCase):
                  "to_id": self.b.id},
             ]
         )
-        self.assertEqual([g["operator"] for g in out["groups"]], ["KSRTC"])
-        options = out["groups"][0]["options"]
+        options = out["options"]
         self.assertEqual(
             [o["route"]["id"] for o in options], [self.r1.id, self.r2.id]
         )
-        self.assertIn("KSRTC", out["answer"])
+        self.assertTrue(
+            all(o["operator"] == "KSRTC" for o in options)
+        )
+        self.assertIn("2 direct options", out["answer"])
         self.assertNotIn("Other services", out["answer"])
 
-    def test_mixed_operators_yield_two_groups(self):
+    def test_mixed_operators_share_one_flat_list(self):
         out = agent.rank_pairs(
             [
                 {"route_id": self.r1.id, "from_id": self.a.id,
@@ -82,8 +84,12 @@ class RankedTests(ApiTestCase):
             ]
         )
         self.assertEqual(
-            [g["operator"] for g in out["groups"]],
-            ["City Private", "KSRTC"],
+            [o["route"]["id"] for o in out["options"]],
+            [self.r1.id, self.r3.id],
+        )
+        self.assertEqual(
+            [o["operator"] for o in out["options"]],
+            ["KSRTC", "City Private"],
         )
 
     def test_unknown_operator_sorts_last(self):
@@ -94,9 +100,8 @@ class RankedTests(ApiTestCase):
             ],
             operators={self.r1.id: None},
         )
-        self.assertEqual(
-            [g["operator"] for g in out["groups"]], ["Other services"]
-        )
+        self.assertEqual(len(out["options"]), 1)
+        self.assertEqual(out["options"][0]["operator"], "Other services")
 
     def test_single_option_is_one_item_list(self):
         out = agent.rank_pairs(
@@ -105,8 +110,9 @@ class RankedTests(ApiTestCase):
                  "to_id": self.b.id},
             ]
         )
-        self.assertEqual(len(out["groups"]), 1)
-        self.assertEqual(len(out["groups"][0]["options"]), 1)
+        self.assertEqual(len(out["options"]), 1)
+        self.assertEqual(out["total_options"], 1)
+        self.assertEqual(out["total_pages"], 1)
 
     def test_boarding_hint_only_when_supported(self):
         out = agent.rank_pairs(
@@ -115,7 +121,7 @@ class RankedTests(ApiTestCase):
                  "to_id": self.b.id},
             ]
         )
-        hint = out["groups"][0]["options"][0].get("boarding_hint")
+        hint = out["options"][0].get("boarding_hint")
         self.assertTrue(hint)
         self.assertIn("Aluva", hint)
         bare = agent.rank_pairs(
@@ -125,9 +131,7 @@ class RankedTests(ApiTestCase):
             ],
             names={self.a.id: ""},
         )
-        self.assertNotIn(
-            "boarding_hint", bare["groups"][0]["options"][0]
-        )
+        self.assertNotIn("boarding_hint", bare["options"][0])
 
     def test_no_times_in_ranked_text(self):
         out = agent.rank_pairs(
@@ -160,6 +164,91 @@ class RankedTests(ApiTestCase):
         for dest in out["destinations"]:
             self.assertTrue(dest["evidence"].startswith("/routes/"))
         self.assertIn("2 more", out["answer"])
+
+    def test_flat_options_follow_global_rank_order(self):
+        # 014: no per-operator groups; one flat list ordered by
+        # (stop_count, route id) across operators.
+        out = agent.rank_pairs(
+            [
+                {"route_id": self.r1.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+                {"route_id": self.r2.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+                {"route_id": self.r3.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+            ]
+        )
+        self.assertNotIn("groups", out)
+        self.assertNotIn("option_groups", out)
+        self.assertEqual(
+            [o["route"]["id"] for o in out["options"]],
+            [self.r1.id, self.r3.id, self.r2.id],
+        )
+
+    def test_flat_options_carry_operator_and_network(self):
+        out = agent.rank_pairs(
+            [
+                {"route_id": self.r1.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+                {"route_id": self.r3.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+            ]
+        )
+        by_route = {o["route"]["id"]: o for o in out["options"]}
+        self.assertEqual(by_route[self.r1.id]["operator"], "KSRTC")
+        self.assertEqual(by_route[self.r1.id]["network"], "Kochi")
+        self.assertEqual(
+            by_route[self.r3.id]["operator"], "City Private"
+        )
+        self.assertEqual(by_route[self.r3.id]["network"], "Kochi")
+
+    def test_flat_unknown_operator_sorts_last(self):
+        out = agent.rank_pairs(
+            [
+                {"route_id": self.r3.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+                {"route_id": self.r1.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+            ],
+            operators={self.r1.id: None},
+        )
+        self.assertEqual(
+            [o["operator"] for o in out["options"]],
+            ["City Private", "Other services"],
+        )
+
+    def test_flat_prose_is_bounded_summary(self):
+        out = agent.rank_pairs(
+            [
+                {"route_id": self.r1.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+                {"route_id": self.r2.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+                {"route_id": self.r3.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+            ]
+        )
+        self.assertLessEqual(len(out["answer"]), 1000)
+        self.assertIn("3 direct options", out["answer"])
+        self.assertIn("Aluva Direct", out["answer"])
+
+    def test_prose_summary_omits_full_enumeration(self):
+        # US3: the summary names only the quickest option, never the
+        # full list, and stays within 1000 characters.
+        out = agent.rank_pairs(
+            [
+                {"route_id": self.r1.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+                {"route_id": self.r2.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+                {"route_id": self.r3.id, "from_id": self.a.id,
+                 "to_id": self.b.id},
+            ]
+        )
+        self.assertIn("Aluva Direct", out["answer"])
+        self.assertNotIn("Aluva Hopper", out["answer"])
+        self.assertNotIn("City Sprint", out["answer"])
+        self.assertLessEqual(len(out["answer"]), 1000)
 
     def test_empty_matrix_refuses_without_options(self):
         body = self.ask(

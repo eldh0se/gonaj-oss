@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import JourneyPanel from "./JourneyPanel.jsx";
 
@@ -33,7 +34,7 @@ describe("JourneyPanel", () => {
       throw new Error("must not be called");
     });
     vi.stubGlobal("fetch", fetch);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     expect(
       screen.getByRole("heading", { name: /journey helper/i })
     ).toBeTruthy();
@@ -47,7 +48,7 @@ describe("JourneyPanel", () => {
 
   it("renders an evidence-grounded answer with a working link", async () => {
     mockFetch(OK_PAYLOAD);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from Ernakulam South to Fort Kochi?" },
     });
@@ -61,7 +62,7 @@ describe("JourneyPanel", () => {
 
   it("renders a plain refusal with no links", async () => {
     mockFetch(REFUSE_PAYLOAD);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get somewhere unknown?" },
     });
@@ -83,7 +84,7 @@ describe("JourneyPanel", () => {
     };
     const fetch = vi.fn(async () => ({ ok: true, json: async () => disambiguate }));
     vi.stubGlobal("fetch", fetch);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North?" },
     });
@@ -127,7 +128,7 @@ describe("JourneyPanel", () => {
       return { ok: true, json: async () => payload };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North?" },
     });
@@ -190,7 +191,7 @@ describe("JourneyPanel", () => {
       return { ok: true, json: async () => payload };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from Aluva to Kaloor?" },
     });
@@ -210,7 +211,7 @@ describe("JourneyPanel", () => {
   });
 
   it("says plainly when voice input is unavailable", async () => {
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.pointerDown(screen.getByRole("button", { name: /dictate/i }));
     expect(await screen.findByText(/voice input is not available/i)).toBeTruthy();
   });
@@ -285,7 +286,7 @@ describe("JourneyPanel", () => {
     vi.stubGlobal("AudioContext", MockAudioContext);
     vi.stubGlobal("OfflineAudioContext", MockOfflineAudioContext);
 
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     const dictate = screen.getByRole("button", { name: /dictate/i });
     fireEvent.pointerDown(dictate);
     await screen.findByText(/listening/i);
@@ -345,7 +346,7 @@ describe("JourneyPanel", () => {
     }
     vi.stubGlobal("AudioContext", FailingAudioContext);
 
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     const dictate = screen.getByRole("button", { name: /dictate/i });
     fireEvent.pointerDown(dictate);
     await screen.findByText(/listening/i);
@@ -357,27 +358,59 @@ describe("JourneyPanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("labels answers as unverified AI output", async () => {
+  it("labels answers with the journey agent disclaimer", async () => {
     mockFetch(OK_PAYLOAD);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get there?" },
     });
     fireEvent.click(screen.getByRole("button", { name: /ask/i }));
-    const label = await screen.findByText(/unverified ai answer/i);
+    const label = await screen.findByText(
+      /journey agent can make mistakes, check important info/i
+    );
     expect(label.className).toMatch(/gonaj-unverified/);
+    vi.unstubAllGlobals();
+  });
+
+  it("names the model that generated the answer", async () => {
+    mockFetch(OK_PAYLOAD);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "How do I get there?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    expect(
+      await screen.findByText("Answer generated using muse-spark-1.3.")
+    ).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+
+  it("hides the model line when the answer carries no model", async () => {
+    const { meta, ...rest } = OK_PAYLOAD;
+    mockFetch(rest);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "How do I get there?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    expect(
+      await screen.findByText(/take the south-fort service/i)
+    ).toBeTruthy();
+    expect(screen.queryByText(/generated using/i)).toBeNull();
     vi.unstubAllGlobals();
   });
 
   it("labels refusals with the same unverified family", async () => {
     mockFetch(REFUSE_PAYLOAD);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get nowhere?" },
     });
     fireEvent.click(screen.getByRole("button", { name: /ask/i }));
     await screen.findByText(/could not find a direct service/i);
-    expect(screen.getByText(/unverified/i)).toBeTruthy();
+    expect(
+      screen.getByText(/journey agent can make mistakes/i)
+    ).toBeTruthy();
     vi.unstubAllGlobals();
   });
 
@@ -408,7 +441,7 @@ describe("JourneyPanel", () => {
       };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/from stop/i), {
       target: { value: "Ernakulam" },
     });
@@ -449,7 +482,7 @@ describe("JourneyPanel", () => {
       };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/from stop/i), {
       target: { value: "Ernakulam" },
     });
@@ -495,7 +528,7 @@ describe("JourneyPanel", () => {
       };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/from stop/i, { selector: "input" }), {
       target: { value: "Ernakulam" },
     });
@@ -525,7 +558,7 @@ describe("JourneyPanel", () => {
       throw new Error("network down");
     });
     vi.stubGlobal("fetch", fetch);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get there?" },
     });
@@ -552,7 +585,7 @@ describe("JourneyPanel map choice", () => {
   function renderWithChoice(payload, props = {}) {
     const fetch = vi.fn(async () => ({ ok: true, json: async () => payload }));
     vi.stubGlobal("fetch", fetch);
-    const utils = render(<JourneyPanel {...props} />);
+    const utils = render(<MemoryRouter><JourneyPanel {...props} /></MemoryRouter>);
     return { fetch, ...utils };
   }
 
@@ -595,7 +628,7 @@ describe("JourneyPanel map choice", () => {
     });
     vi.stubGlobal("fetch", fetch);
     const chooseRef = { current: null };
-    render(<JourneyPanel chooseRef={chooseRef} />);
+    render(<MemoryRouter><JourneyPanel chooseRef={chooseRef} /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North to South?" },
     });
@@ -636,7 +669,7 @@ describe("JourneyPanel map choice", () => {
       };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North to South?" },
     });
@@ -668,7 +701,7 @@ describe("JourneyPanel map choice", () => {
       };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<JourneyPanel onShowCandidates={onShowCandidates} />);
+    render(<MemoryRouter><JourneyPanel onShowCandidates={onShowCandidates} /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North to South?" },
     });
@@ -696,7 +729,7 @@ describe("JourneyPanel map choice", () => {
       return { ok: true, json: async () => geoCandidates };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<JourneyPanel />);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North to South?" },
     });
@@ -708,5 +741,206 @@ describe("JourneyPanel map choice", () => {
     vi.unstubAllGlobals();
     // @ts-ignore jsdom cleanup
     delete globalThis.navigator.geolocation;
+  });
+
+  it("renders paged options as cards with operator and evidence", async () => {
+    const page1 = {
+      status: "ok",
+      answer: "4 direct options; quickest: R1 from Kaloor to Fort Kochi.",
+      options: [
+        {
+          route: { id: 1, name: "R1", evidence: "/routes/1" },
+          boarding_stop: { id: 11, name: "Kaloor" },
+          alighting_stop: { id: 18, name: "Fort Kochi" },
+          operator: "KSRTC",
+          network: "City",
+          stop_count: 9,
+          boarding_hint: "Board at Kaloor",
+          also_nearby_boarding: [],
+          also_nearby: [],
+          overflow_nearby_boarding: 0,
+          overflow_nearby: 0,
+        },
+        {
+          route: { id: 2, name: "R2", evidence: "/routes/2" },
+          boarding_stop: { id: 11, name: "Kaloor" },
+          alighting_stop: { id: 19, name: "Mattancherry" },
+          operator: "City Private",
+          network: "City",
+          stop_count: 12,
+          boarding_hint: "Board at Kaloor",
+          also_nearby_boarding: [],
+          also_nearby: [],
+          overflow_nearby_boarding: 0,
+          overflow_nearby: 0,
+        },
+      ],
+      total_options: 4,
+      total_pages: 2,
+      page: 1,
+      page_size: 2,
+      destinations: [],
+      meta: { model: "muse-spark-1.3", provider: "meta", latency_ms: 900 },
+    };
+    const fetch = vi.fn(async () => ({ ok: true, json: async () => page1 }));
+    vi.stubGlobal("fetch", fetch);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "buses from Kaloor to Fort Kochi" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    expect(await screen.findByText("R1")).toBeTruthy();
+    expect(screen.getByText("R2")).toBeTruthy();
+    expect(screen.getByText(/KSRTC/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "R1" }).getAttribute("href")).toBe(
+      "/routes/1"
+    );
+    expect(screen.getByText("KSRTC · City")).toBeTruthy();
+    expect(screen.getByText("Page 1 of 2 · 4 options")).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+
+  it("pages through options with the pager like routes and stops", async () => {
+    const pages = {
+      1: {
+        status: "ok",
+        answer: "4 direct options; quickest: R1 from Kaloor to Fort Kochi.",
+        options: [
+          {
+            route: { id: 1, name: "R1", evidence: "/routes/1" },
+            boarding_stop: { id: 11, name: "Kaloor" },
+            alighting_stop: { id: 18, name: "Fort Kochi" },
+            operator: "KSRTC",
+            network: "City",
+            stop_count: 9,
+            also_nearby_boarding: [],
+            also_nearby: [],
+            overflow_nearby_boarding: 0,
+            overflow_nearby: 0,
+          },
+        ],
+        total_options: 4,
+        total_pages: 2,
+        page: 1,
+        page_size: 1,
+        destinations: [],
+        meta: { model: "muse-spark-1.3", provider: "meta", latency_ms: 900 },
+      },
+      2: {
+        status: "ok",
+        answer: "4 direct options; quickest: R1 from Kaloor to Fort Kochi.",
+        options: [
+          {
+            route: { id: 2, name: "R2", evidence: "/routes/2" },
+            boarding_stop: { id: 11, name: "Kaloor" },
+            alighting_stop: { id: 19, name: "Mattancherry" },
+            operator: "City Private",
+            network: "City",
+            stop_count: 12,
+            also_nearby_boarding: [],
+            also_nearby: [],
+            overflow_nearby_boarding: 0,
+            overflow_nearby: 0,
+          },
+        ],
+        total_options: 4,
+        total_pages: 2,
+        page: 2,
+        page_size: 1,
+        destinations: [],
+        meta: { model: "muse-spark-1.3", provider: "meta", latency_ms: 901 },
+      },
+    };
+    const bodies = [];
+    const fetch = vi.fn(async (url, request) => {
+      const body = JSON.parse(request.body);
+      bodies.push(body);
+      const page = body.page ?? 1;
+      return { ok: true, json: async () => pages[page] };
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "buses from Kaloor to Fort Kochi" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    expect(await screen.findByText("R1")).toBeTruthy();
+    expect(screen.queryByText("R2")).toBeNull();
+    expect(screen.getByText("Page 1 of 2 · 4 options")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /previous options page/i }).disabled
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /next options page/i }));
+    expect(await screen.findByText("R2")).toBeTruthy();
+    expect(screen.queryByText("R1")).toBeNull();
+    expect(bodies[bodies.length - 1].page).toBe(2);
+    expect(screen.getByText("Page 2 of 2 · 4 options")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /next options page/i }).disabled
+    ).toBe(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: /previous options page/i })
+    );
+    expect(await screen.findByText("R1")).toBeTruthy();
+    expect(bodies[bodies.length - 1].page).toBe(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("filters loaded cards and clearing restores them", async () => {
+    const page1 = {
+      status: "ok",
+      answer: "2 direct options; quickest: R1 from Kaloor to Fort Kochi.",
+      options: [
+        {
+          route: { id: 1, name: "R1", evidence: "/routes/1" },
+          boarding_stop: { id: 11, name: "Kaloor" },
+          alighting_stop: { id: 18, name: "Fort Kochi" },
+          operator: "KSRTC",
+          network: "City",
+          stop_count: 9,
+          also_nearby_boarding: [],
+          also_nearby: [],
+          overflow_nearby_boarding: 0,
+          overflow_nearby: 0,
+        },
+        {
+          route: { id: 2, name: "R2", evidence: "/routes/2" },
+          boarding_stop: { id: 11, name: "Kaloor" },
+          alighting_stop: { id: 19, name: "Mattancherry" },
+          operator: "City Private",
+          network: "City",
+          stop_count: 12,
+          also_nearby_boarding: [],
+          also_nearby: [],
+          overflow_nearby_boarding: 0,
+          overflow_nearby: 0,
+        },
+      ],
+      total_options: 2,
+      total_pages: 1,
+      page: 1,
+      page_size: 5,
+      destinations: [],
+      meta: { model: "muse-spark-1.3", provider: "meta", latency_ms: 900 },
+    };
+    const fetch = vi.fn(async () => ({ ok: true, json: async () => page1 }));
+    vi.stubGlobal("fetch", fetch);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "buses from Kaloor to Fort Kochi" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    expect(await screen.findByText("R1")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/filter options/i), {
+      target: { value: "private" },
+    });
+    expect(screen.queryByText("R1")).toBeNull();
+    expect(screen.getByText("R2")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/filter options/i), {
+      target: { value: "" },
+    });
+    expect(screen.getByText("R1")).toBeTruthy();
+    expect(screen.getByText("R2")).toBeTruthy();
+    vi.unstubAllGlobals();
   });
 });

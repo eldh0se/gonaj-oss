@@ -165,7 +165,7 @@ normative in [contracts/](contracts/).
 
 - **Decision**: A `JourneyPanel` chat component renders model
   text in a visually distinct AI style with inline `/routes/:id`
-  evidence links and a persistent "Unverified AI answer" label;
+  evidence links and a persistent "Journey agent can make mistakes, Check important info" label;
   deterministic fallback and refusal states use the same label
   family. The panel talks only to the two REST endpoints via a
   thin `journey.js` client — no model SDK in the bundle.

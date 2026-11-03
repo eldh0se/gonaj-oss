@@ -328,19 +328,20 @@ UNKNOWN_OPERATOR = "Other services"
 
 
 def _rank_pairs(pairs, operators=None, names=None):
-    """Group verified pairs by operator; order (stop_count, route id).
+    """Rank verified pairs as one flat list (014: no operator groups).
 
     Pure ranking over verified route pairs (no model): each pair is
     ``{"route_id", "from_id", "to_id"}``. Returns
-    ``(groups, by_id)`` where ``by_id`` maps route ids to their
+    ``(options, by_id)`` where ``by_id`` maps route ids to their
     verified ``(route, from_id, to_id, from_name, to_name)`` tuples.
-    Unknown routes are skipped; ``operators``/``names`` override the
-    annotated values (used by tests).
+    Options carry ``operator``/``network`` as display data and are
+    ordered globally by (known operator first, ``stop_count``,
+    route id). Unknown routes are skipped; ``operators``/``names``
+    override the annotated values (used by tests).
     """
     operators = operators or {}
     names = names or {}
-    grouped = {}
-    order = []
+    options = []
     by_id = {}
     for pair in pairs or []:
         route_id = (pair or {}).get("route_id")
@@ -370,6 +371,8 @@ def _rank_pairs(pairs, operators=None, names=None):
             },
             "boarding_stop": {"id": from_id, "name": from_name},
             "alighting_stop": {"id": to_id, "name": to_name},
+            "operator": group,
+            "network": route.get("network") or "",
             "stop_count": len(stops),
             "also_nearby_boarding": (pair or {}).get("mates_from") or [],
             "also_nearby": (pair or {}).get("mates_to") or [],
@@ -383,80 +386,111 @@ def _rank_pairs(pairs, operators=None, names=None):
             if origin and origin != from_name:
                 hint = f"{hint} ({origin})"
             option["boarding_hint"] = hint
-        if group not in grouped:
-            grouped[group] = []
-            order.append(group)
-        grouped[group].append(option)
+        options.append(option)
         by_id[route_id] = (route, from_id, to_id, from_name, to_name)
-    groups = []
-    for group in sorted(order, key=lambda g: (g == UNKNOWN_OPERATOR, g)):
-        options = sorted(
-            grouped[group],
-            key=lambda o: (o["stop_count"], o["route"]["id"]),
+    options.sort(
+        key=lambda o: (
+            o["operator"] == UNKNOWN_OPERATOR,
+            o["stop_count"],
+            o["route"]["id"],
         )
-        groups.append({"operator": group, "options": options})
-    return groups, by_id
+    )
+    return options, by_id
 
 
-def rank_pairs(pairs, operators=None, names=None, destinations=None):
-    """Rank verified pairs into operator groups with answer prose.
+_DEFAULT_PAGE_SIZE = 5
+_MAX_PAGE_SIZE = 20
+
+
+def _normalize_page(page, page_size):
+    """Clamp paging to page ≥ 1 and 1 ≤ page_size ≤ 20 (never errors)."""
+    try:
+        page = int(page)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        size = int(page_size)
+    except (TypeError, ValueError):
+        size = _DEFAULT_PAGE_SIZE
+    if page < 1:
+        page = 1
+    if size < 1:
+        size = _DEFAULT_PAGE_SIZE
+    if size > _MAX_PAGE_SIZE:
+        size = _MAX_PAGE_SIZE
+    return page, size
+
+
+def rank_pairs(
+    pairs,
+    operators=None,
+    names=None,
+    destinations=None,
+    page=1,
+    page_size=_DEFAULT_PAGE_SIZE,
+):
+    """Rank verified pairs into a flat paged option list with prose.
 
     ``destinations`` is a precomputed reachable-member list of
     ``{"stop", "evidence"}`` entries; only the first five are returned,
-    with overflow counted in the prose. Pure function (no model).
+    with overflow counted in the prose. ``page``/``page_size`` slice
+    the global relevance order; totals always describe the full list.
+    Pure function (no model).
     """
-    groups, _by_id = _rank_pairs(pairs, operators, names)
+    options, _by_id = _rank_pairs(pairs, operators, names)
+    page, size = _normalize_page(page, page_size)
+    total = len(options)
+    pages = (total + size - 1) // size if total else 0
+    start = (page - 1) * size
+    shown_options = options[start : start + size]
     shown = list(destinations or [])[:5]
     extra = len(destinations or []) - len(shown)
-    if len(groups) == 1 and len(groups[0]["options"]) == 1 and extra <= 0:
-        option = groups[0]["options"][0] if groups else None
-        if option is None:
-            answer = ""
-        else:
-            answer = (
-                f"Take the {option['route']['name'] or 'direct'} service "
-                f"from {option['boarding_stop']['name']} "
-                f"to {option['alighting_stop']['name']}."
-            ) + _walk_note(
-                option["boarding_stop"]["name"],
-                option["also_nearby_boarding"],
-                option["overflow_nearby_boarding"],
-            ) + _walk_note(
-                option["alighting_stop"]["name"],
-                option["also_nearby"],
-                option["overflow_nearby"],
-            )
+    if total == 1 and extra <= 0:
+        option = options[0]
+        answer = (
+            f"Take the {option['route']['name'] or 'direct'} service "
+            f"from {option['boarding_stop']['name']} "
+            f"to {option['alighting_stop']['name']}."
+        ) + _walk_note(
+            option["boarding_stop"]["name"],
+            option["also_nearby_boarding"],
+            option["overflow_nearby_boarding"],
+        ) + _walk_note(
+            option["alighting_stop"]["name"],
+            option["also_nearby"],
+            option["overflow_nearby"],
+        )
+    elif not options:
+        answer = ""
     else:
-        sentences = []
-        for group in groups:
-            for option in group["options"]:
-                sentences.append(
-                    f"{group['operator']}: Take the "
-                    f"{option['route']['name'] or 'direct'} service "
-                    f"from {option['boarding_stop']['name']} "
-                    f"to {option['alighting_stop']['name']}, "
-                    f"see {option['route']['evidence']}."
-                    + _walk_note(
-                        option["boarding_stop"]["name"],
-                        option["also_nearby_boarding"],
-                        option["overflow_nearby_boarding"],
-                    )
-                    + _walk_note(
-                        option["alighting_stop"]["name"],
-                        option["also_nearby"],
-                        option["overflow_nearby"],
-                    )
-                )
-        answer = " ".join(sentences)
+        top = options[0]
+        answer = (
+            f"{total} direct options; quickest: "
+            f"{top['route']['name'] or 'direct'} "
+            f"from {top['boarding_stop']['name']} "
+            f"to {top['alighting_stop']['name']}."
+        ) + _walk_note(
+            top["boarding_stop"]["name"],
+            top["also_nearby_boarding"],
+            top["overflow_nearby_boarding"],
+        ) + _walk_note(
+            top["alighting_stop"]["name"],
+            top["also_nearby"],
+            top["overflow_nearby"],
+        )
     if extra > 0:
         answer = (
             f"{answer} Plus {extra} more drop-off options "
             "at this place.".strip()
         )
     return {
-        "groups": groups,
+        "options": shown_options,
         "destinations": shown,
-        "answer": answer,
+        "answer": answer[:1000],
+        "total_options": total,
+        "total_pages": pages,
+        "page": page,
+        "page_size": size,
     }
 
 
@@ -1161,26 +1195,25 @@ def _classify_pairs(viable, from_groups, to_groups, tracker):
     return classified
 
 
-def _destinations_from_groups(ranked_groups):
+def _destinations_from_options(ranked_options):
     """Unique alighting stops in ranked order (rank_pairs caps at 5)."""
     seen = []
-    for group in ranked_groups:
-        for option in group.get("options", []):
-            stop = option.get("alighting_stop") or {}
-            if stop.get("id") not in [s["stop"]["id"] for s in seen]:
-                seen.append(
-                    {
-                        "stop": {
-                            "id": stop.get("id"),
-                            "name": stop.get("name") or "",
-                        },
-                        "evidence": option["route"]["evidence"],
-                    }
-                )
+    for option in ranked_options or []:
+        stop = option.get("alighting_stop") or {}
+        if stop.get("id") not in [s["stop"]["id"] for s in seen]:
+            seen.append(
+                {
+                    "stop": {
+                        "id": stop.get("id"),
+                        "name": stop.get("name") or "",
+                    },
+                    "evidence": option["route"]["evidence"],
+                }
+            )
     return seen
 
 
-def _answer_from_classified(classified, tracker):
+def _answer_from_classified(classified, tracker, page=1, page_size=5):
     """Ranked (payload, route, from, to) from classified pairs (no meta)."""
     pairs = [
         {
@@ -1194,11 +1227,14 @@ def _answer_from_classified(classified, tracker):
         }
         for item in classified
     ]
-    groups, by_id = _rank_pairs(pairs)
-    if not groups or not by_id:
+    options, by_id = _rank_pairs(pairs)
+    if not options or not by_id:
         return None
     ranked = rank_pairs(
-        pairs, destinations=_destinations_from_groups(groups)
+        pairs,
+        destinations=_destinations_from_options(options),
+        page=page,
+        page_size=page_size,
     )
     first = classified[0]
     route = by_id[first["route_id"]][0]
@@ -1215,7 +1251,9 @@ _FAMILIAR_SUGGEST = (
 )
 
 
-def _matrix_answer(from_ids, to_ids, from_groups, to_groups, tracker):
+def _matrix_answer(
+    from_ids, to_ids, from_groups, to_groups, tracker, page=1, page_size=5
+):
     """Matrix test + classify + answer.
 
     Returns (answer_item_or_None, info) where info carries
@@ -1264,7 +1302,12 @@ def _matrix_answer(from_ids, to_ids, from_groups, to_groups, tracker):
     )
     if not classified:
         return None, info
-    return _answer_from_classified(classified, tracker), info
+    return (
+        _answer_from_classified(
+            classified, tracker, page=page, page_size=page_size
+        ),
+        info,
+    )
 
 
 def _pick_payload(slot, offered_ids, resolved, message):
@@ -1297,7 +1340,9 @@ def _pick_payload(slot, offered_ids, resolved, message):
     return payload
 
 
-def _expanded_singleton_answer(from_id, to_id, tracker):
+def _expanded_singleton_answer(
+    from_id, to_id, tracker, page=1, page_size=5
+):
     """FR-010: exact-id pair failed; expand each end to its group and retry."""
     group_f = _group_for_stop(from_id, tracker)
     group_t = _group_for_stop(to_id, tracker)
@@ -1315,10 +1360,14 @@ def _expanded_singleton_answer(from_id, to_id, tracker):
         [group_f] if group_f else None,
         [group_t] if group_t else None,
         tracker,
+        page=page,
+        page_size=page_size,
     )
 
 
-def _remaining_from_groups(question, known_slot, known_id, tracker):
+def _remaining_from_groups(
+    question, known_slot, known_id, tracker, page=1, page_size=5
+):
     """Derive the other end via search_places groups (replaces single-stop).
 
     Inexact hits go through the model intent check with exclude_ids
@@ -1350,12 +1399,24 @@ def _remaining_from_groups(question, known_slot, known_id, tracker):
     known_groups = [known_group] if known_group else None
     if known_slot == "from":
         item, info = _matrix_answer(
-            [known_id], member_ids, known_groups, groups, tracker
+            [known_id],
+            member_ids,
+            known_groups,
+            groups,
+            tracker,
+            page=page,
+            page_size=page_size,
         )
         untested = info["untested_to_ids"]
     else:
         item, info = _matrix_answer(
-            member_ids, [known_id], groups, known_groups, tracker
+            member_ids,
+            [known_id],
+            groups,
+            known_groups,
+            tracker,
+            page=page,
+            page_size=page_size,
         )
         untested = info["untested_from_ids"]
     if item is None:
@@ -1365,7 +1426,7 @@ def _remaining_from_groups(question, known_slot, known_id, tracker):
     return item, None
 
 
-def _fresh_matrix_answer(question, tracker):
+def _fresh_matrix_answer(question, tracker, page=1, page_size=5):
     """Deterministic groups-first answer for from-to questions.
 
     Exact (icontains) ends resolve straight to the matrix flow. Inexact
@@ -1406,6 +1467,8 @@ def _fresh_matrix_answer(question, tracker):
         from_groups,
         to_groups,
         tracker,
+        page=page,
+        page_size=page_size,
     )
     if item is None:
         if info["truncated"]:
@@ -1424,7 +1487,7 @@ def _walk_note(end_name, mates, overflow):
     return f" Also near {end_name}: {bits}{extra}."
 
 
-def run_journey(*, question, history=(), context=None):
+def run_journey(*, question, history=(), context=None, page=1, page_size=5):
     """Answer, disambiguate, or refuse one journey question.
 
     Returns ``(payload, tools_used)``; ``payload`` already carries its
@@ -1468,15 +1531,16 @@ def run_journey(*, question, history=(), context=None):
 
     def ranked_payload(ranked, first_route, from_id, to_id, draft):
         payload, _ = _answer_payload(first_route, from_id, to_id, "", None)
-        single = (
-            len(ranked["groups"]) == 1
-            and len(ranked["groups"][0]["options"]) == 1
-        )
+        single = ranked["total_options"] == 1 and len(ranked["options"]) == 1
         if draft and single and not _forbidden(draft):
             payload["answer"] = draft
         else:
             payload["answer"] = ranked["answer"]
-        payload["option_groups"] = ranked["groups"]
+        payload["options"] = ranked["options"]
+        payload["total_options"] = ranked["total_options"]
+        payload["total_pages"] = ranked["total_pages"]
+        payload["page"] = ranked["page"]
+        payload["page_size"] = ranked["page_size"]
         payload["destinations"] = ranked["destinations"]
         return payload
 
@@ -1518,6 +1582,8 @@ def run_journey(*, question, history=(), context=None):
                     "evidence": f"/routes/{first_route['id']}",
                 }
             ],
+            page=page,
+            page_size=page_size,
         )
         return selection_finish(
             ranked_payload(ranked, first_route, from_id, to_id, "")
@@ -1533,10 +1599,18 @@ def run_journey(*, question, history=(), context=None):
     if selection[0] == "full":
         _, from_id, to_id = selection
         item, info = _matrix_answer(
-            [from_id], [to_id], None, None, tracker
+            [from_id],
+            [to_id],
+            None,
+            None,
+            tracker,
+            page=page,
+            page_size=page_size,
         )
         if item is None and not info["truncated"]:
-            item, info = _expanded_singleton_answer(from_id, to_id, tracker)
+            item, info = _expanded_singleton_answer(
+                from_id, to_id, tracker, page=page, page_size=page_size
+            )
         if item is None:
             if info["truncated"]:
                 return selection_finish(
@@ -1562,7 +1636,12 @@ def run_journey(*, question, history=(), context=None):
         )
         if not remaining_ids:
             derived = _remaining_from_groups(
-                question, known_slot, known_id, tracker
+                question,
+                known_slot,
+                known_id,
+                tracker,
+                page=page,
+                page_size=page_size,
             )
             if derived is not None:
                 item, fail = derived
@@ -1686,7 +1765,9 @@ def run_journey(*, question, history=(), context=None):
         return finish({"status": "refuse", "message": _CANNOT_ANSWER}, fallback=True)
 
     if selection[0] in ("none", "fresh"):
-        fresh = _fresh_matrix_answer(question, tracker)
+        fresh = _fresh_matrix_answer(
+            question, tracker, page=page, page_size=page_size
+        )
         if fresh is not None:
             item, problem = fresh
             if item is not None:
@@ -1814,6 +1895,8 @@ def run_journey(*, question, history=(), context=None):
                         "evidence": f"/routes/{first_route['id']}",
                     }
                 ],
+                page=page,
+                page_size=page_size,
             )
             return ranked_payload(
                 ranked, first_route, first_from, first_to, text

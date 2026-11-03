@@ -45,6 +45,149 @@ def make_kaloor_corridor(label="factory-area-search"):
     }
 
 
+class FlatPagingTests(TestCase):
+    """Flat paged ranking (014): slices, totals, clamping."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.geo = make_kaloor_corridor(label="factory-area-flat-paging")
+
+    def _pairs(self, count):
+        geo = self.geo
+        frm = [geo["a1"], geo["a2"], geo["a3"]]
+        to = [geo["k1"], geo["k2"], geo["k3"], geo["k4"], geo["k5"]]
+        return [
+            {
+                "route_id": geo["route1"].id,
+                "from_id": frm[i % 3].id,
+                "to_id": to[i % 5].id,
+            }
+            for i in range(count)
+        ]
+
+    def _boarding_ids(self, out):
+        return [o["boarding_stop"]["id"] for o in out["options"]]
+
+    def test_default_page_returns_first_five_of_seven(self):
+        from apps.journey import agent
+
+        geo = self.geo
+        out = agent.rank_pairs(self._pairs(7))
+        self.assertEqual(
+            self._boarding_ids(out),
+            [geo["a1"].id, geo["a2"].id, geo["a3"].id,
+             geo["a1"].id, geo["a2"].id],
+        )
+        self.assertEqual(out["total_options"], 7)
+        self.assertEqual(out["total_pages"], 2)
+        self.assertEqual(out["page"], 1)
+        self.assertEqual(out["page_size"], 5)
+
+    def test_second_page_continues_order(self):
+        from apps.journey import agent
+
+        geo = self.geo
+        out = agent.rank_pairs(self._pairs(7), page=2, page_size=3)
+        self.assertEqual(
+            self._boarding_ids(out),
+            [geo["a1"].id, geo["a2"].id, geo["a3"].id],
+        )
+        self.assertEqual(out["total_options"], 7)
+        self.assertEqual(out["total_pages"], 3)
+
+    def test_beyond_last_page_is_empty(self):
+        from apps.journey import agent
+
+        out = agent.rank_pairs(self._pairs(7), page=5, page_size=3)
+        self.assertEqual(out["options"], [])
+        self.assertEqual(out["total_options"], 7)
+        self.assertEqual(out["total_pages"], 3)
+
+    def test_page_size_clamped_to_max(self):
+        from apps.journey import agent
+
+        out = agent.rank_pairs(self._pairs(7), page_size=100)
+        self.assertEqual(len(out["options"]), 7)
+        self.assertEqual(out["page_size"], 20)
+        self.assertEqual(out["total_pages"], 1)
+
+    def test_page_zero_behaves_as_one(self):
+        from apps.journey import agent
+
+        first = agent.rank_pairs(self._pairs(7), page=1, page_size=3)
+        zero = agent.rank_pairs(self._pairs(7), page=0, page_size=3)
+        self.assertEqual(zero["page"], 1)
+        self.assertEqual(
+            self._boarding_ids(zero), self._boarding_ids(first)
+        )
+
+    def test_page_size_zero_behaves_as_default(self):
+        from apps.journey import agent
+
+        out = agent.rank_pairs(self._pairs(7), page_size=0)
+        self.assertEqual(out["page_size"], 5)
+        self.assertEqual(len(out["options"]), 5)
+
+    def test_exact_multiple_has_no_trailing_page(self):
+        from apps.journey import agent
+
+        full = agent.rank_pairs(self._pairs(6), page=2, page_size=3)
+        self.assertEqual(len(full["options"]), 3)
+        self.assertEqual(full["total_pages"], 2)
+        empty = agent.rank_pairs(self._pairs(6), page=3, page_size=3)
+        self.assertEqual(empty["options"], [])
+
+
+class EndpointPageWalkTests(TestCase):
+    """Paginated answers end to end (014 US1)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.geo = make_kaloor_corridor(label="factory-area-page-walk")
+
+    def _ask(self, **kw):
+        from apps.journey.agent import run_journey
+        from apps.journey.providers import meta as provider
+
+        real = provider.complete_with_tools
+        provider.complete_with_tools = UnusedModel()
+        try:
+            payload, _ = run_journey(
+                question="How do I get from Aluva to Kaloor?", **kw
+            )
+        finally:
+            provider.complete_with_tools = real
+        return payload
+
+    def test_pages_partition_without_overlap(self):
+        first = self._ask(page=1, page_size=1)
+        self.assertEqual(first["status"], "ok")
+        total = first["total_options"]
+        self.assertGreaterEqual(total, 1)
+        self.assertEqual(first["total_pages"], total)
+        self.assertNotIn("option_groups", first)
+        seen = []
+        for page in range(1, total + 1):
+            out = self._ask(page=page, page_size=1)
+            self.assertEqual(out["page"], page)
+            self.assertEqual(len(out["options"]), 1)
+            key = (
+                out["options"][0]["boarding_stop"]["id"],
+                out["options"][0]["alighting_stop"]["id"],
+                out["options"][0]["route"]["id"],
+            )
+            self.assertNotIn(key, seen)
+            seen.append(key)
+        self.assertEqual(len(seen), total)
+
+    def test_defaults_are_first_page_of_five(self):
+        out = self._ask()
+        self.assertEqual(out["page"], 1)
+        self.assertEqual(out["page_size"], 5)
+        self.assertLessEqual(len(out["options"]), 5)
+        self.assertNotIn("option_groups", out)
+
+
 class JourneyDebugLogTests(TestCase):
     """Debug trace: question, tool outputs, and per-step decisions."""
 
