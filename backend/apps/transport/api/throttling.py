@@ -1,15 +1,18 @@
 """Per-IP throttling with hashed, expiring counter keys (FR-021–FR-024).
 
-The minute and day budgets are shared across all five reads. The
-client identity is the direct connection address unless the
-deployment configures a known proxy (``TRANSPORT_TRUSTED_PROXY``),
-in which case the leftmost forwarded-for address is used. Counter
-keys carry only a SHA-256 hash of the IP — raw IPs never reach the
-cache backend (FR-023).
+The minute and day read budgets are shared across map reads. The
+journey and transcribe endpoints each carry their own minute/day
+budgets (specs/015-api-abuse-protection), fully detached from the
+shared reads. The client identity is the direct connection address
+unless the deployment configures a known proxy
+(``TRANSPORT_TRUSTED_PROXY``), in which case the leftmost
+forwarded-for address is used. Counter keys carry only a SHA-256
+hash of the IP — raw IPs never reach the cache backend (FR-023).
 """
 import hashlib
 
 from django.conf import settings
+from rest_framework.exceptions import Throttled
 from rest_framework.throttling import SimpleRateThrottle
 
 
@@ -50,3 +53,37 @@ class TransportDayThrottle(_HashedThrottle):
 
 
 READ_THROTTLE_CLASSES = [TransportMinuteThrottle, TransportDayThrottle]
+
+
+class JourneyMinuteThrottle(_HashedThrottle):
+    scope = "journey_min"
+
+
+class JourneyDayThrottle(_HashedThrottle):
+    scope = "journey_day"
+
+
+class TranscribeMinuteThrottle(_HashedThrottle):
+    scope = "transcribe_min"
+
+
+class TranscribeDayThrottle(_HashedThrottle):
+    scope = "transcribe_day"
+
+
+JOURNEY_THROTTLE_CLASSES = [JourneyMinuteThrottle, JourneyDayThrottle]
+TRANSCRIBE_THROTTLE_CLASSES = [TranscribeMinuteThrottle, TranscribeDayThrottle]
+
+
+def check_budgets(request, throttle_classes):
+    """Run per-endpoint budgets explicitly, after request validation.
+
+    Raises DRF ``Throttled`` (429 + ``Retry-After``) on the first
+    denial. Denied requests record nothing; only requests that reach
+    this check can consume budget, and rejected (400) requests never
+    reach it. Same allow/record semantics as the decorator path.
+    """
+    for cls in throttle_classes:
+        throttle = cls()
+        if not throttle.allow_request(request, None):
+            raise Throttled(throttle.wait())
