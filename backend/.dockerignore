@@ -1,0 +1,14 @@
+# Keep backend image slim and secret-free (context is ./backend).
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.env
+.env.prod
+staticfiles/
+*.log
+db.sqlite3
+.pytest_cache/
+.ruff_cache/
