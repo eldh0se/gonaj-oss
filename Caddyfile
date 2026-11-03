@@ -1,0 +1,22 @@
+# Production edge for Gonaj on single VPS.
+# Stop host nginx first: it already binds 80/443 on this VPS.
+# sudo systemctl stop nginx && sudo systemctl disable nginx
+:80 {
+	# API and admin go to gunicorn; everything else serves the Vite build.
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+	handle /admin/* {
+		reverse_proxy backend:8000
+	}
+	handle /static/* {
+		reverse_proxy backend:8000
+	}
+	handle /* {
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
+}
+# TLS: replace `:80` with your domain, e.g. `gonaj.example.com { ... }`.
+# Caddy then provisions ACME certs automatically; Cloudflare TLS mode must be Full (Strict).
