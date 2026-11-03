@@ -9,6 +9,78 @@ import { useEffect, useRef, useState } from "react";
 import { getConnectivity, listStops } from "../api/client.js";
 import { postJourney, postTranscribe } from "../api/journey.js";
 
+const WAV_SAMPLE_RATE = 24000;
+
+function wavBlob(audioBuffer) {
+  const channel = audioBuffer.getChannelData(0);
+  const dataSize = channel.length * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeString = (offset, text) => {
+    for (let i = 0; i < text.length; i += 1) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  };
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, audioBuffer.sampleRate, true);
+  view.setUint32(28, audioBuffer.sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, "data");
+  view.setUint32(40, dataSize, true);
+  for (let i = 0; i < channel.length; i += 1) {
+    const sample = Math.max(-1, Math.min(1, channel[i]));
+    view.setInt16(
+      44 + i * 2,
+      sample < 0 ? sample * 0x8000 : sample * 0x7fff,
+      true
+    );
+  }
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+async function encodeToWav(blob) {
+  const AudioContextClass =
+    globalThis.AudioContext || globalThis.webkitAudioContext;
+  if (!AudioContextClass || !globalThis.OfflineAudioContext) {
+    throw new Error("webaudio-unavailable");
+  }
+  const sourceContext = new AudioContextClass();
+  const raw = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("read-failed"));
+    reader.onload = () => resolve(reader.result);
+    reader.readAsArrayBuffer(blob);
+  });
+  let decoded;
+  try {
+    decoded = await sourceContext.decodeAudioData(raw);
+  } finally {
+    if (sourceContext.close) await sourceContext.close().catch(() => {});
+  }
+  const length = Math.max(
+    1,
+    Math.ceil(decoded.duration * WAV_SAMPLE_RATE)
+  );
+  const offline = new globalThis.OfflineAudioContext(
+    1,
+    length,
+    WAV_SAMPLE_RATE
+  );
+  const source = offline.createBufferSource();
+  source.buffer = decoded;
+  source.connect(offline.destination);
+  source.start(0);
+  const rendered = await offline.startRendering();
+  return wavBlob(rendered);
+}
+
 const CANNOT_ANSWER_NOW =
   "The journey helper cannot answer right now. Please try again later.";
 
@@ -117,6 +189,7 @@ export default function JourneyPanel({
   const chunksRef = useRef([]);
   const askAbort = useRef(null);
   const directAbort = useRef(null);
+  const questionInputRef = useRef(null);
   const [fromText, setFromText] = useState("");
   const [fromStop, setFromStop] = useState(null);
   const [toText, setToText] = useState("");
@@ -166,8 +239,19 @@ export default function JourneyPanel({
         return;
       }
       setState({ status: "loading" });
+      let wav;
       try {
-        const body = await postTranscribe(blob);
+        wav = await encodeToWav(blob);
+      } catch {
+        setState({
+          status: "error",
+          message: "We could not transcribe that audio. Please try again.",
+        });
+        if (questionInputRef.current) questionInputRef.current.focus();
+        return;
+      }
+      try {
+        const body = await postTranscribe(wav);
         setQuestion(body.transcript);
         setState({ status: "idle" });
       } catch (err) {
@@ -353,6 +437,7 @@ export default function JourneyPanel({
           id="gonaj-journey-question"
           type="text"
           role="textbox"
+          ref={questionInputRef}
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
           placeholder="How do I get from Ernakulam South to Fort Kochi?"
