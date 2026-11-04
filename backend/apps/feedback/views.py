@@ -5,7 +5,11 @@ import string
 
 from django.db import IntegrityError
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import (
+    api_view,
+    authentication_classes,
+    permission_classes,
+)
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
@@ -46,6 +50,7 @@ def _journey_header(journey):
 
 
 @api_view(["POST"])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def feedback(request):
     body = request.data
