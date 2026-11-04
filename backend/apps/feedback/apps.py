@@ -1,0 +1,8 @@
+"""Anonymous passenger feedback: receipted curation reports, no accounts."""
+
+from django.apps import AppConfig
+
+
+class FeedbackConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "apps.feedback"

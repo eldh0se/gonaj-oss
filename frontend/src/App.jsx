@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import MapView from "./components/MapView.jsx";
+import ReportDialog from "./components/ReportDialog.jsx";
 import ResultsList from "./components/ResultsList.jsx";
 import RouteOverlay from "./components/RouteOverlay.jsx";
 import JourneyPanel from "./components/JourneyPanel.jsx";
@@ -71,6 +72,8 @@ export function MapPage() {
     errorDetail: "",
   });
   const [stopCard, setStopCard] = useState(null);
+  // Report dialog context; null means closed. Opening never touches the map.
+  const [report, setReport] = useState(null);
   const [overlay, setOverlay] = useState({ state: "idle", detail: null, errorDetail: "" });
   const [center, setCenter] = useState(null);
   const [candidateView, setCandidateView] = useState(null);
@@ -300,6 +303,9 @@ export function MapPage() {
         <h1 className="gonaj-title">
           <Link to="/">Gonaj</Link>
         </h1>
+        <button type="button" onClick={() => setReport({})}>
+          Report issue
+        </button>
       </header>
 
       <div className="gonaj-body">
@@ -352,6 +358,7 @@ export function MapPage() {
               <JourneyPanel
                 onShowCandidates={handleShowCandidates}
                 chooseRef={panelChooseRef}
+                onReportIssue={setReport}
               />
             }
           />
@@ -368,14 +375,29 @@ export function MapPage() {
           state={overlay.state}
           errorDetail={overlay.errorDetail}
           onDismiss={handleDismissOverlay}
+          onReportIssue={setReport}
         />
       ) : (
         !routeId &&
         stopCard && (
           <section aria-label="Selected stop" className="gonaj-overlay">
-            <button type="button" onClick={() => setStopCard(null)}>
-              Close
-            </button>
+            <div className="gonaj-overlay-actions">
+              <button type="button" onClick={() => setStopCard(null)}>
+                Close
+              </button>
+              {stopCard.state === "ok" && stopCard.detail && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setReport({
+                      stop: { id: stopCard.detail.id, name: stopCard.detail.name },
+                    })
+                  }
+                >
+                  Report issue
+                </button>
+              )}
+            </div>
             {stopCard.state === "loading" && <p role="status">Loading stop…</p>}
             {stopCard.state === "error" && (
               <p role="alert">{stopCard.errorDetail}</p>
@@ -402,6 +424,12 @@ export function MapPage() {
           </section>
         )
       )}
+
+      <ReportDialog
+        open={report !== null}
+        context={report ?? {}}
+        onClose={() => setReport(null)}
+      />
     </div>
   );
 }
