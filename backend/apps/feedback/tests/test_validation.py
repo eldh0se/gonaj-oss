@@ -60,6 +60,23 @@ class FeedbackValidationTest(TestCase):
         assert response.status_code == 400
         assert FeedbackReport.objects.count() == 0
 
+    def test_session_cookie_without_csrf_token_still_succeeds(self):
+        # Prod HAR: a same-origin session cookie triggered DRF
+        # SessionAuthentication CSRF enforcement (403). Public POSTs
+        # carry no auth (journey/transport precedent), so a session
+        # cookie must never break the endpoint.
+        from django.contrib.auth.models import User
+
+        User.objects.create_user("reporter", password="x")
+        client = APIClient(enforce_csrf_checks=True)
+        client.login(username="reporter", password="x")
+        response = client.post(
+            "/api/v1/feedback/",
+            {"category": "other", "message": "Session present."},
+            format="json",
+        )
+        assert response.status_code == 201
+
     def test_identical_posts_each_create_a_record(self):
         # No backend dedupe by design: the single-record guarantee for
         # one user submit lives in the dialog pending guard (spec FR-004),

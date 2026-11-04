@@ -654,11 +654,13 @@ export default function JourneyPanel({
         </button>
         <button
           type="button"
+          className="gonaj-dictate-button"
           aria-label="Dictate your question"
           title="Press and hold to record"
           onPointerDown={handleDictateDown}
           onPointerUp={handleDictateUp}
           onPointerLeave={handleDictateUp}
+          onContextMenu={(event) => event.preventDefault()}
         >
           Dictate
         </button>
