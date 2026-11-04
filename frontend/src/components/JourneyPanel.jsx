@@ -88,7 +88,7 @@ const CANNOT_ANSWER_NOW =
 
 const NO_DIRECT = "I could not find a direct service between those stops.";
 
-function StopPicker({ label, text, onTextChange, selected, onSelect, onClear }) {
+function StopPicker({ label, text, onTextChange, selected, onSelect, onClear, disabled }) {
   const [options, setOptions] = useState([]);
   const inputId = `gonaj-journey-${label.toLowerCase().replace(/\s+/g, "-")}`;
 
@@ -124,6 +124,7 @@ function StopPicker({ label, text, onTextChange, selected, onSelect, onClear }) 
           onChange={(event) => onTextChange(event.target.value)}
           placeholder={`Type a stop name`}
           autoComplete="off"
+          disabled={disabled}
         />
         {selected && (
           <button
@@ -239,6 +240,8 @@ function JourneyOptionCards({ options, filter, walkNote }) {
   );
 }
 
+const TAP_MS = 300;
+
 export default function JourneyPanel({
   onShowCandidates,
   chooseRef,
@@ -247,8 +250,17 @@ export default function JourneyPanel({
   const [state, setState] = useState({ status: "idle" });
   const [mapHelpDismissed, setMapHelpDismissed] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [tapHint, setTapHint] = useState(false);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
+  const pressTimerRef = useRef(null);
+
+  useEffect(
+    () => () => {
+      if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+    },
+    []
+  );
   const askAbort = useRef(null);
   const directAbort = useRef(null);
   const questionInputRef = useRef(null);
@@ -331,6 +343,7 @@ export default function JourneyPanel({
       try {
         const body = await postTranscribe(wav);
         setQuestion(body.transcript);
+        clearDirectInputs();
         setState({ status: "idle" });
       } catch (err) {
         setState({
@@ -353,7 +366,38 @@ export default function JourneyPanel({
     }
   }
 
+  // Press-and-hold: capture starts only after a sustained hold. Releasing
+  // before TAP_MS explains the gesture instead — never touching the mic.
+  function handleDictateDown(event) {
+    event.preventDefault?.();
+    setTapHint(false);
+    if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+    pressTimerRef.current = setTimeout(() => {
+      pressTimerRef.current = null;
+      startDictation();
+    }, TAP_MS);
+  }
+
+  function handleDictateUp() {
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+      setTapHint(true);
+      return;
+    }
+    stopDictation();
+  }
+
+  const askLoading = state.status === "loading";
+
+  function stopAsk() {
+    askAbort.current?.abort();
+    setState({ status: "idle" });
+  }
+
   async function findDirectRoutes() {
+    // Belt and braces with the disabled UI: never run alongside an ask.
+    if (state.status === "loading") return;
     if (!fromStop || !toStop) {
       setDirect({
         status: "error",
@@ -361,9 +405,10 @@ export default function JourneyPanel({
       });
       return;
     }
+    // A real direct search starts: the ask side must go, not just abort.
+    clearAskMode();
     askAbort.current?.abort();
     directAbort.current?.abort();
-    setState({ status: "idle" });
     const controller = new AbortController();
     directAbort.current = controller;
     setDirect({ status: "loading" });
@@ -418,6 +463,27 @@ export default function JourneyPanel({
     onShowCandidates?.(null);
   }
 
+  // Mutual clear (016 FR-006): each mode owns the panel; starting one resets
+  // the other, including half-made selections.
+  function clearDirectInputs() {
+    setFromText("");
+    setFromStop(null);
+    setToText("");
+    setToStop(null);
+    setDirect({ status: "idle" });
+  }
+
+  function clearAskMode() {
+    setQuestion("");
+    setState({ status: "idle" });
+    setCards([]);
+    setPaging(null);
+    pagingRef.current = null;
+    setFilter("");
+    setLoadingMore(false);
+    hideCandidates();
+  }
+
   function noneOfThese() {
     // Guided retry: forget the stale candidates and re-ask fresh.
     hideCandidates();
@@ -432,7 +498,7 @@ export default function JourneyPanel({
   async function ask(text, context, history) {
     const wording = (text ?? question).trim();
     if (!wording) {
-      setDirect({ status: "idle" });
+      clearDirectInputs();
       setState({
         status: "refuse",
         message:
@@ -443,7 +509,7 @@ export default function JourneyPanel({
     }
     askAbort.current?.abort();
     directAbort.current?.abort();
-    setDirect({ status: "idle" });
+    clearDirectInputs();
     setMapHelpDismissed(false);
     setCards([]);
     setPaging(null);
@@ -582,18 +648,32 @@ export default function JourneyPanel({
           onChange={(event) => setQuestion(event.target.value)}
           placeholder="How do I get from Ernakulam South to Fort Kochi?"
         />
-        <button type="submit">Ask</button>
+        <button type="submit" disabled={recording}>
+          Ask
+        </button>
         <button
           type="button"
           aria-label="Dictate your question"
-          onPointerDown={startDictation}
-          onPointerUp={stopDictation}
-          onPointerLeave={stopDictation}
+          title="Press and hold to record"
+          onPointerDown={handleDictateDown}
+          onPointerUp={handleDictateUp}
+          onPointerLeave={handleDictateUp}
         >
           Dictate
         </button>
       </form>
-      {recording && <p role="status">Listening… release to send.</p>}
+      <p className="gonaj-dictate-hint">Press and hold to record</p>
+      {tapHint && !recording && (
+        <p role="status">
+          Quick tap detected — press and hold the Dictate button to record.
+        </p>
+      )}
+      {recording && (
+        <p role="status">
+          <span className="gonaj-rec-dot" aria-hidden="true" />
+          Listening… release to send.
+        </p>
+      )}
 
       <div className="gonaj-journey-or" role="separator">
         <span>OR</span>
@@ -606,16 +686,19 @@ export default function JourneyPanel({
         onTextChange={(value) => {
           setFromText(value);
           setFromStop(null);
+          clearAskMode();
         }}
         selected={fromStop}
         onSelect={(stop) => {
           setFromStop(stop);
           setFromText(stop.name);
+          clearAskMode();
         }}
         onClear={() => {
           setFromStop(null);
           setFromText("");
         }}
+        disabled={askLoading}
       />
       <StopPicker
         label="To stop"
@@ -623,19 +706,22 @@ export default function JourneyPanel({
         onTextChange={(value) => {
           setToText(value);
           setToStop(null);
+          clearAskMode();
         }}
         selected={toStop}
         onSelect={(stop) => {
           setToStop(stop);
           setToText(stop.name);
+          clearAskMode();
         }}
         onClear={() => {
           setToStop(null);
           setToText("");
         }}
+        disabled={askLoading}
       />
       </div>
-      <button type="button" onClick={findDirectRoutes}>
+      <button type="button" onClick={findDirectRoutes} disabled={askLoading}>
         Find direct routes
       </button>
 
@@ -663,7 +749,12 @@ export default function JourneyPanel({
         )}
 
         {state.status === "loading" && (
-          <p role="status">Finding a direct service…</p>
+          <>
+            <p role="status">Finding a direct service…</p>
+            <button type="button" onClick={stopAsk}>
+              Stop
+            </button>
+          </>
         )}
 
         {state.status === "ok" && (

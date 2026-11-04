@@ -9,6 +9,14 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
   });
 }
 
+// Build-time version defines (`__APP_*__` via vite.config.js `define`).
+// Vitest runs without Vite defines, so default them here; suites covering
+// the footer version override per case via `globalThis.__APP_VERSION__`
+// (assign for the metadata case, `delete` for the fallback case).
+for (const key of ["__APP_VERSION__", "__APP_SHA__", "__APP_BUILT_AT__"]) {
+  if (!(key in globalThis)) globalThis[key] = undefined;
+}
+
 // Shared Leaflet mock factory for component tests. Tests replace the
 // `leaflet` module with the returned `L` object:
 //
@@ -35,6 +43,12 @@ export function createLeafletMock() {
       setStyle: vi.fn(),
       clearLayers: vi.fn(),
       addLayer: vi.fn(),
+      bindTooltip: vi.fn(function bindTooltip() {
+        return this;
+      }),
+      unbindTooltip: vi.fn(function unbindTooltip() {
+        return this;
+      }),
     };
     layers.push(layer);
     return layer;
@@ -74,6 +88,8 @@ export function createLeafletMock() {
     }),
     tileLayer: vi.fn(() => makeLayer()),
     circleMarker: vi.fn(() => makeLayer()),
+    marker: vi.fn(() => makeLayer()),
+    divIcon: vi.fn(() => ({})),
     polyline: vi.fn(() => makeLayer()),
     layerGroup: vi.fn(() => makeLayer()),
   };
