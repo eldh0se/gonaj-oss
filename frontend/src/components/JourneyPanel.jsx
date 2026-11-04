@@ -245,6 +245,7 @@ const TAP_MS = 300;
 export default function JourneyPanel({
   onShowCandidates,
   chooseRef,
+  onReportIssue,
 } = {}) {
   const [question, setQuestion] = useState("");
   const [state, setState] = useState({ status: "idle" });
@@ -767,6 +768,23 @@ export default function JourneyPanel({
                 <p>Answer generated using {state.payload.meta.model}.</p>
               )}
             <p>{state.payload.answer}</p>
+            {onReportIssue && (
+              <button
+                type="button"
+                className="gonaj-journey-report"
+                onClick={() =>
+                  onReportIssue({
+                    journey: {
+                      question,
+                      from_name: fromStop?.name,
+                      to_name: toStop?.name,
+                    },
+                  })
+                }
+              >
+                Report issue
+              </button>
+            )}
             {Array.isArray(state.payload.options) ? (
               <>
                 <div className="gonaj-journey-filter">

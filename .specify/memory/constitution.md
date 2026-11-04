@@ -1,5 +1,12 @@
 # Gonaj OSS Constitution
 
+<!-- Sync Impact Report (temporary review scratch; remove before commit):
+- Version change: 1.4.0 → 1.5.0 (MINOR: materially expanded guidance).
+- Modified principles: II (Read-Only Public Product with Feedback) — added MVP generic-vocabulary carve-out with schedule-data return condition.
+- Added sections: none. Removed sections: none.
+- Follow-up TODOs: none. Deferred non-governance intents (F2–F4 analysis remediation) listed in the turn's Next Actions, not applied here per constitution-command scope guard.
+-->
+
 ## Core Principles
 
 ### I. MVP Validation First (NON-NEGOTIABLE)
@@ -27,7 +34,13 @@ structured data with category (`WRONG_SCHEDULE`, `MISSING_STOP`,
 `WRONG_ROUTE`, `ROUTE_NOT_OPERATING`, `OTHER`) and status (`new`,
 `reviewed`, `dismissed`) so frequently reported routes and
 stops are identifiable and can later feed an evidence-based
-crowdsourcing system.
+crowdsourcing system. For MVP non-schedule feedback, where no schedule
+data exists to distinguish the schedule-specific categories, the generic
+vocabulary (`incorrect`, `missing`, `outdated`, `other`) MAY be used
+instead, stored verbatim under the same status lifecycle and human
+triage. When schedule data lands, the schedule-specific categories
+return as the active vocabulary for schedule feedback; generic records
+already stored keep their values.
 
 ### III. Open Access Without Accounts; Minimal Data Collection
 
@@ -166,6 +179,7 @@ backward-incompatible governance or principle removals/redefinitions,
 MINOR for new principles or materially expanded guidance, PATCH for
 clarifications and wording fixes.
 
-**Version**: 1.4.0 | **Ratified**: 2026-10-28 | **Last Amended**: 2026-10-29
+**Version**: 1.5.0 | **Ratified**: 2026-10-28 | **Last Amended**: 2026-11-04
 
+**Amendment history**: v1.5.0 (2026-11-04) — Principle II permits the generic feedback vocabulary (`incorrect`, `missing`, `outdated`, `other`) for MVP non-schedule feedback, with schedule-specific categories returning when schedule data lands. Recorded as remediation of 017-anonymous-feedback analysis finding F1.
 **Amendment history**: v1.4.0 (2026-10-29) — JSX permitted where the existing scaffold sets the precedent (TypeScript remains preferred; conversion tracked as follow-up); 'MapLibre' clarified as MapLibre GL JS. Supersedes the React+TypeScript stack MUST for scaffold extensions; recorded as remediation of 005-route-map analysis findings C1/L2.

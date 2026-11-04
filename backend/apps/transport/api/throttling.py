@@ -75,6 +75,17 @@ JOURNEY_THROTTLE_CLASSES = [JourneyMinuteThrottle, JourneyDayThrottle]
 TRANSCRIBE_THROTTLE_CLASSES = [TranscribeMinuteThrottle, TranscribeDayThrottle]
 
 
+class FeedbackMinuteThrottle(_HashedThrottle):
+    scope = "feedback_min"
+
+
+class FeedbackDayThrottle(_HashedThrottle):
+    scope = "feedback_day"
+
+
+FEEDBACK_THROTTLE_CLASSES = [FeedbackMinuteThrottle, FeedbackDayThrottle]
+
+
 def check_budgets(request, throttle_classes):
     """Run per-endpoint budgets explicitly, after request validation.
 

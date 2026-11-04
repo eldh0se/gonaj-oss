@@ -108,6 +108,7 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.transport",
     "apps.journey",
+    "apps.feedback",
 ]
 
 MIDDLEWARE = [
@@ -187,6 +188,8 @@ REST_FRAMEWORK = {
         "journey_day": _env_rate("JOURNEY_THROTTLE_DAY", "1500/day"),
         "transcribe_min": _env_rate("TRANSCRIBE_THROTTLE_MINUTE", "20/min"),
         "transcribe_day": _env_rate("TRANSCRIBE_THROTTLE_DAY", "300/day"),
+        "feedback_min": _env_rate("FEEDBACK_THROTTLE_MINUTE", "20/min"),
+        "feedback_day": _env_rate("FEEDBACK_THROTTLE_DAY", "100/day"),
     },
 }
 

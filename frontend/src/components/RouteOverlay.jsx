@@ -3,12 +3,24 @@ import { routeLabel } from "./ResultsList.jsx";
 // Route detail overlay on the same page. Detail payload or state in,
 // dismiss out. Ordered stops with origin/terminus marked; empty
 // membership and unknown ids are explicit plain-language states.
-export default function RouteOverlay({ detail, state, errorDetail, onDismiss }) {
+export default function RouteOverlay({ detail, state, errorDetail, onDismiss, onReportIssue }) {
   return (
     <section aria-label="Route detail" className="gonaj-overlay">
-      <button type="button" onClick={onDismiss}>
-        Close
-      </button>
+      <div className="gonaj-overlay-actions">
+        <button type="button" onClick={onDismiss}>
+          Close
+        </button>
+        {(state === "ok" || state === "empty") && detail && onReportIssue && (
+          <button
+            type="button"
+            onClick={() =>
+              onReportIssue({ route: { id: detail.id, name: detail.name } })
+            }
+          >
+            Report issue
+          </button>
+        )}
+      </div>
       {state === "loading" && <p role="status">Loading route…</p>}
       {state === "not-found" && (
         <p role="alert">

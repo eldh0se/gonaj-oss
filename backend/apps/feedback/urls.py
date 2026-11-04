@@ -1,0 +1,8 @@
+"""URL routes for anonymous passenger feedback."""
+from django.urls import path
+
+from . import views
+
+urlpatterns = [
+    path("feedback/", views.feedback, name="feedback"),
+]

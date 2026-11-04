@@ -57,6 +57,21 @@
   padding-left: 0.5rem;
 }
 
+.gonaj-header > button {
+  font: inherit;
+  color: var(--gonaj-ink);
+  background: var(--gonaj-surface);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  padding: 0.3rem 0.8rem;
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.gonaj-header > button:hover {
+  background: var(--gonaj-sage);
+}
+
 .gonaj-version {
   flex: none;
   font-size: 12px;
@@ -316,7 +331,14 @@
   padding-left: 0.5rem;
 }
 
-.gonaj-overlay > button {
+.gonaj-overlay-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.gonaj-overlay-actions > button {
   font: inherit;
   color: var(--gonaj-ink);
   background: var(--gonaj-surface);
@@ -326,7 +348,7 @@
   cursor: pointer;
 }
 
-.gonaj-overlay > button:hover {
+.gonaj-overlay-actions > button:hover {
   background: var(--gonaj-sage);
 }
 
@@ -690,6 +712,17 @@
   background: var(--gonaj-sage);
 }
 
+.gonaj-journey-report {
+  font: inherit;
+  color: var(--gonaj-green-dark);
+  background: none;
+  border: none;
+  padding: 0.15rem 0;
+  margin: 0 0 0.4rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .gonaj-journey-filter {
   margin: 0 0 0.4rem;
 }
@@ -807,4 +840,183 @@ button:focus-visible {
     box-shadow: 0 -4px 16px rgba(23, 32, 28, 0.15);
   }
 
+}
+
+/* Shared feedback report dialog (017-anonymous-feedback T010).
+   Centered popup modal, never a second overlay dock and never an
+   inline page section. Reuses the existing --gonaj tokens, 10px
+   radius, system type, and button/notice patterns; Esc/backdrop
+   close; honours reduced motion. */
+.gonaj-feedback-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(23, 32, 28, 0.45);
+}
+
+.gonaj-feedback-dialog {
+  width: min(480px, 100%);
+  max-height: min(90dvh, 640px);
+  overflow-y: auto;
+  background: var(--gonaj-surface);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  box-shadow: 0 8px 32px rgba(23, 32, 28, 0.25);
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.gonaj-feedback-dialog h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0.25rem 0 0.75rem;
+  border-left: 4px solid var(--gonaj-green);
+  padding-left: 0.5rem;
+}
+
+.gonaj-feedback-chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+}
+
+.gonaj-feedback-chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 14px;
+  background: var(--gonaj-sage);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  padding: 0.15rem 0.35rem 0.15rem 0.6rem;
+}
+
+.gonaj-feedback-chips li button {
+  font: inherit;
+  color: var(--gonaj-ink);
+  background: none;
+  border: none;
+  border-radius: var(--gonaj-radius);
+  padding: 0.1rem 0.3rem;
+  cursor: pointer;
+}
+
+.gonaj-feedback-dialog label {
+  display: block;
+  margin: 0.6rem 0 0.25rem;
+  font-weight: 600;
+}
+
+.gonaj-feedback-dialog input,
+.gonaj-feedback-dialog select,
+.gonaj-feedback-dialog textarea {
+  font: inherit;
+  font-size: 14px;
+  color: var(--gonaj-ink);
+  width: 100%;
+  background: var(--gonaj-surface);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  padding: 0.45rem 0.7rem;
+}
+
+.gonaj-feedback-dialog input:focus-visible,
+.gonaj-feedback-dialog select:focus-visible,
+.gonaj-feedback-dialog textarea:focus-visible {
+  outline: 2px solid var(--gonaj-green);
+  outline-offset: 1px;
+}
+
+.gonaj-feedback-count {
+  margin: 0.25rem 0 0;
+  color: var(--gonaj-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.gonaj-feedback-dialog p[role="alert"] {
+  background: var(--gonaj-amber-wash);
+  border: 1px solid var(--gonaj-amber);
+  border-radius: var(--gonaj-radius);
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0 0;
+}
+
+.gonaj-feedback-dialog p[role="alert"] button {
+  font: inherit;
+  color: var(--gonaj-green-dark);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.gonaj-feedback-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.gonaj-feedback-actions button[type="submit"] {
+  font: inherit;
+  font-weight: 600;
+  color: var(--gonaj-surface);
+  background: var(--gonaj-green);
+  border: none;
+  border-radius: var(--gonaj-radius);
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+
+.gonaj-feedback-actions button[type="submit"]:hover:not(:disabled) {
+  background: var(--gonaj-green-dark);
+}
+
+.gonaj-feedback-actions button[type="submit"]:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.gonaj-feedback-actions button[type="button"] {
+  font: inherit;
+  color: var(--gonaj-ink);
+  background: var(--gonaj-surface);
+  border: 1px solid var(--gonaj-line);
+  border-radius: var(--gonaj-radius);
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+
+.gonaj-feedback-actions button[type="button"]:hover:not(:disabled) {
+  background: var(--gonaj-sage);
+}
+
+.gonaj-feedback-reference {
+  font-size: 17px;
+  font-weight: 600;
+  border-left: 4px solid var(--gonaj-green);
+  padding-left: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+@media (max-width: 48rem) {
+  .gonaj-feedback-scrim {
+    padding: 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gonaj-feedback-scrim,
+  .gonaj-feedback-dialog {
+    transition: none;
+    animation: none;
+  }
 }
