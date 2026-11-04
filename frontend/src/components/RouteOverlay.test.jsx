@@ -1,6 +1,15 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import RouteOverlay from "./RouteOverlay.jsx";
+
+// Stylesheets are stubbed in jsdom, so assert the shipped CSS text directly.
+const appCss = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "../App.css"),
+  "utf8"
+);
 
 const DETAIL = {
   id: 17,
@@ -55,6 +64,25 @@ describe("RouteOverlay", () => {
     const gutters = container.querySelectorAll(".gonaj-tl-gutter");
     expect(gutters).toHaveLength(3);
     expect(items[0].querySelector(".gonaj-tl-gutter")).toBeTruthy();
+  });
+
+  it("caps the mobile sheet at half the viewport with internal scroll", () => {
+    const mobile = appCss.slice(appCss.indexOf("@media (max-width: 48rem)"));
+    expect(mobile).toMatch(/\.gonaj-overlay\s*\{[^}]*max-height:\s*50dvh/);
+  });
+
+  it("keeps the desktop dock untouched (with internal scroll)", () => {
+    const desktop = appCss.slice(0, appCss.indexOf("@media (max-width: 48rem)"));
+    expect(desktop).toMatch(/\.gonaj-overlay\s*\{[^}]*width:\s*min\(400px,\s*100%\)/);
+    // The mobile sheet inherits internal scrolling from this base rule.
+    expect(desktop).toMatch(/\.gonaj-overlay\s*\{[^}]*overflow-y:\s*auto/);
+  });
+
+  it("offers Close only — no collapse or expand control", () => {
+    const noop = () => {};
+    render(<RouteOverlay detail={DETAIL} state="ok" errorDetail="" onDismiss={noop} />);
+    expect(screen.getByRole("button", { name: /^close$/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /collapse|expand/i })).toBeNull();
   });
 
   it("reports unknown routes and failures in plain language", () => {

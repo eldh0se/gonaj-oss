@@ -3,16 +3,23 @@ import { useEffect, useRef, useState } from "react";
 const DEBOUNCE_MS = 300;
 
 // Text input over the application's own data only. Emits debounced
-// query strings; makes no network calls itself.
-export default function SearchBox({ onQuery }) {
-  const [value, setValue] = useState("");
+// query strings; makes no network calls itself. Uncontrolled by default;
+// pass value + onValueChange to share one text across instances.
+export default function SearchBox({ onQuery, value, onValueChange }) {
+  const [inner, setInner] = useState("");
+  const text = value !== undefined ? value : inner;
   const onQueryRef = useRef(onQuery);
   onQueryRef.current = onQuery;
 
   useEffect(() => {
-    const timer = setTimeout(() => onQueryRef.current?.(value), DEBOUNCE_MS);
+    const timer = setTimeout(() => onQueryRef.current?.(text), DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [value]);
+  }, [text]);
+
+  function handleChange(event) {
+    if (onValueChange) onValueChange(event.target.value);
+    else setInner(event.target.value);
+  }
 
   return (
     <form
@@ -24,9 +31,9 @@ export default function SearchBox({ onQuery }) {
       <input
         id="gonaj-search-input"
         type="search"
-        value={value}
+        value={text}
         placeholder="Route, place, or stop name"
-        onChange={(event) => setValue(event.target.value)}
+        onChange={handleChange}
       />
     </form>
   );

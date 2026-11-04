@@ -400,6 +400,204 @@ describe("JourneyPanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("clears direct and ask modes when the other starts", async () => {
+    const fetch = vi.fn(async (url, options) => {
+      const target = String(url);
+      if (target.includes("/connectivity/")) {
+        return {
+          ok: true,
+          json: async () => ({
+            count: 1,
+            results: [{ id: 1, name: "Direct-One", evidence: "/api/v1/routes/1/" }],
+            total_pages: 1,
+          }),
+        };
+      }
+      if (target.includes("/journey/")) {
+        return { ok: true, json: async () => ({ ...REFUSE_PAYLOAD }) };
+      }
+      const isFort = target.includes("Fort");
+      return {
+        ok: true,
+        json: async () => ({
+          results: isFort
+            ? [{ id: 18, name: "Fort Kochi" }]
+            : [{ id: 11, name: "Kaloor" }],
+          count: 1,
+          total_pages: 1,
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+
+    // Seed ask state, then start direct input: ask clears.
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "How do I get there?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+    await screen.findByText(/could not find a direct service/i);
+    fireEvent.change(screen.getByLabelText(/from stop/i), {
+      target: { value: "Kal" },
+    });
+    expect(screen.getByLabelText(/your journey question/i).value).toBe("");
+    expect(screen.queryByText(/could not find a direct service/i)).toBeNull();
+
+    // Seed direct state, then submit an ask: direct clears.
+    fireEvent.click(await screen.findByRole("button", { name: "Kaloor" }));
+    fireEvent.change(screen.getByLabelText(/to stop/i, { selector: "input" }), {
+      target: { value: "Fort" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Fort Kochi" }));
+    fireEvent.click(screen.getByRole("button", { name: /find direct routes/i }));
+    await screen.findByRole("link", { name: "Direct-One" });
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "And now by bus?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+    await screen.findByText(/could not find a direct service/i);
+    expect(screen.queryByRole("link", { name: "Direct-One" })).toBeNull();
+    expect(screen.getByLabelText(/from stop/i, { selector: "input" }).value).toBe("");
+    expect(screen.getByLabelText(/to stop/i, { selector: "input" }).value).toBe("");
+
+    // Mid-selection abandonment: half-made direct pick clears on ask.
+    fireEvent.change(screen.getByLabelText(/from stop/i), {
+      target: { value: "Kal" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Kaloor" }));
+    expect(screen.getByLabelText(/from stop/i, { selector: "input" }).value).toBe("Kaloor");
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "One more try?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+    await screen.findByText(/could not find a direct service/i);
+    expect(screen.getByLabelText(/from stop/i, { selector: "input" }).value).toBe("");
+    vi.unstubAllGlobals();
+  });
+
+  it("clears direct inputs when dictation completes", async () => {
+    const fetch = vi.fn(async (url) => {
+      const target = String(url);
+      if (target.includes("transcribe")) {
+        return { ok: true, json: async () => ({ transcript: "dictated commute" }) };
+      }
+      const isFort = target.includes("Fort");
+      return {
+        ok: true,
+        json: async () => ({
+          results: isFort
+            ? [{ id: 18, name: "Fort Kochi" }]
+            : [{ id: 11, name: "Kaloor" }],
+          count: 1,
+          total_pages: 1,
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetch);
+    const tracks = [{ stop: vi.fn() }];
+    Object.defineProperty(globalThis.navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn(async () => ({ getTracks: () => tracks })) },
+      configurable: true,
+    });
+    class MockRecorder {
+      constructor() {
+        this.state = "inactive";
+      }
+      start() {
+        this.state = "recording";
+      }
+      stop() {
+        this.state = "inactive";
+        this.ondataavailable?.({
+          data: new Blob(["audio-bytes"], { type: "audio/webm" }),
+        });
+        this.onstop?.();
+      }
+    }
+    vi.stubGlobal("MediaRecorder", MockRecorder);
+    class MockAudioContext {
+      async decodeAudioData() {
+        return { duration: 1 };
+      }
+      async close() {}
+    }
+    class MockOfflineAudioContext {
+      createBufferSource() {
+        return { connect() {}, start() {} };
+      }
+      async startRendering() {
+        return {
+          getChannelData: () => new Float32Array(24000),
+          sampleRate: 24000,
+          duration: 1,
+        };
+      }
+    }
+    vi.stubGlobal("AudioContext", MockAudioContext);
+    vi.stubGlobal("OfflineAudioContext", MockOfflineAudioContext);
+
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText(/from stop/i), {
+      target: { value: "Kal" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Kaloor" }));
+    expect(screen.getByLabelText(/from stop/i, { selector: "input" }).value).toBe("Kaloor");
+    const dictate = screen.getByRole("button", { name: /dictate/i });
+    fireEvent.pointerDown(dictate);
+    await screen.findByText(/listening/i);
+    fireEvent.pointerUp(dictate);
+    expect(await screen.findByDisplayValue("dictated commute")).toBeTruthy();
+    expect(screen.getByLabelText(/from stop/i, { selector: "input" }).value).toBe("");
+    vi.unstubAllGlobals();
+  });
+
+  it("locks direct controls while asking with a working Stop", async () => {
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const fetch = vi.fn(async (url) => {
+      const target = String(url);
+      if (target.includes("/journey/")) {
+        return {
+          ok: true,
+          json: async () => {
+            await gate;
+            return { ...REFUSE_PAYLOAD };
+          },
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ results: [], count: 0, total_pages: 1 }),
+      };
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "Hold the bus?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+    await screen.findByText(/finding a direct service/i);
+    expect(screen.getByLabelText(/from stop/i, { selector: "input" }).disabled).toBe(true);
+    expect(screen.getByLabelText(/to stop/i, { selector: "input" }).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: /find direct routes/i }).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /^stop$/i }));
+    // Aborted to idle with the question intact; nothing asked directly.
+    expect(screen.queryByText(/finding a direct service/i)).toBeNull();
+    expect(screen.getByLabelText(/your journey question/i).value).toBe("Hold the bus?");
+    expect(
+      fetch.mock.calls.some(([u]) => String(u).includes("/connectivity/"))
+    ).toBe(false);
+    // A fresh ask still works after the abort.
+    fireEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+    await screen.findByText(/finding a direct service/i);
+    release();
+    await screen.findByText(/could not find a direct service/i);
+    expect(screen.getByLabelText(/from stop/i, { selector: "input" }).disabled).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
   it("labels refusals with the same unverified family", async () => {
     mockFetch(REFUSE_PAYLOAD);
     render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
@@ -941,6 +1139,92 @@ describe("JourneyPanel map choice", () => {
     });
     expect(screen.getByText("R1")).toBeTruthy();
     expect(screen.getByText("R2")).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+
+  it("explains press-and-hold on a quick tap without capturing", async () => {
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    const dictate = screen.getByRole("button", { name: /dictate/i });
+    // Persistent hint plus tooltip.
+    expect(dictate.getAttribute("title")).toMatch(/press and hold to record/i);
+    expect(screen.getByText(/^press and hold to record$/i)).toBeTruthy();
+    // Quick tap: inline explanation, never audio capture.
+    fireEvent.pointerDown(dictate);
+    fireEvent.pointerUp(dictate);
+    expect(
+      await screen.findByText(/press and hold the dictate button to record/i)
+    ).toBeTruthy();
+    expect(screen.queryByText(/voice input is not available/i)).toBeNull();
+    expect(screen.queryByText(/listening/i)).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows recording state with Ask disabled while holding", async () => {
+    const fetch = vi.fn(async (url) => {
+      if (String(url).includes("transcribe")) {
+        return { ok: true, json: async () => ({ transcript: "held words" }) };
+      }
+      throw new Error("should not ask while recording");
+    });
+    vi.stubGlobal("fetch", fetch);
+    const tracks = [{ stop: vi.fn() }];
+    const stream = { getTracks: () => tracks };
+    Object.defineProperty(globalThis.navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn(async () => stream) },
+      configurable: true,
+    });
+    class MockRecorder {
+      constructor(streamArg) {
+        this.stream = streamArg;
+        this.state = "inactive";
+      }
+      start() {
+        this.state = "recording";
+      }
+      stop() {
+        this.state = "inactive";
+        this.ondataavailable?.({
+          data: new Blob(["audio-bytes"], { type: "audio/webm" }),
+        });
+        this.onstop?.();
+      }
+    }
+    vi.stubGlobal("MediaRecorder", MockRecorder);
+    class MockAudioContext {
+      async decodeAudioData() {
+        return { duration: 1 };
+      }
+      async close() {}
+    }
+    class MockOfflineAudioContext {
+      constructor(channels, length, rate) {
+        this.sampleRate = rate;
+      }
+      createBufferSource() {
+        return { connect() {}, start() {} };
+      }
+      async startRendering() {
+        return {
+          getChannelData: () => new Float32Array(24000),
+          sampleRate: 24000,
+          duration: 1,
+        };
+      }
+    }
+    vi.stubGlobal("AudioContext", MockAudioContext);
+    vi.stubGlobal("OfflineAudioContext", MockOfflineAudioContext);
+
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    const dictate = screen.getByRole("button", { name: /dictate/i });
+    const ask = screen.getByRole("button", { name: /^ask$/i });
+    fireEvent.pointerDown(dictate);
+    // Hold past the tap threshold: recording state, Ask locked.
+    const status = await screen.findByText(/listening/i);
+    expect(status.querySelector(".gonaj-rec-dot")).toBeTruthy();
+    expect(ask.disabled).toBe(true);
+    fireEvent.pointerUp(dictate);
+    expect(await screen.findByDisplayValue("held words")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^ask$/i }).disabled).toBe(false);
     vi.unstubAllGlobals();
   });
 });

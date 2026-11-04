@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import SearchBox from "./SearchBox.jsx";
 
 export function routeLabel(route) {
   if (route.name) return route.name;
@@ -68,9 +69,12 @@ export default function ResultsList({
   onRoutePage,
   onStopPage,
   journeyContent = null,
+  onQuery,
 }) {
   const [tab, setTab] = useState(journeyContent ? "journey" : "routes");
   const [expanded, setExpanded] = useState(null);
+  // One shared search text for both tab panels; the Journey tab gets none.
+  const [text, setText] = useState("");
 
   // When only one side has results, show it without asking.
   // Never pulls the passenger away from the Journey tab.
@@ -85,30 +89,45 @@ export default function ResultsList({
     setExpanded(null);
   }, [stopList]);
 
-  if (state === "loading") {
-    return <p role="status">Searching…</p>;
+  // Non-ok states keep the tab shell (and its per-tab search box) so the
+  // passenger can refine the query; the message renders as panel content.
+  // Matches the old global-box behavior where the box never disappeared.
+  function statusNote() {
+    if (state === "loading") return <p role="status">Searching…</p>;
+    if (state === "error") {
+      return <p role="alert">{errorDetail || "Search cannot load right now."}</p>;
+    }
+    if (state === "no-match") {
+      return (
+        <p role="status">
+          Nothing matched that search. Check the spelling or browse the map.
+        </p>
+      );
+    }
+    if (state === "empty") {
+      return <p role="status">No routes or stops listed yet.</p>;
+    }
+    return null;
   }
-  if (state === "error") {
-    return <p role="alert">{errorDetail || "Search cannot load right now."}</p>;
-  }
-  if (state === "no-match") {
-    return (
-      <p role="status">
-        Nothing matched that search. Check the spelling or browse the map.
-      </p>
-    );
-  }
-  if (state === "empty") {
-    return <p role="status">No routes or stops listed yet.</p>;
-  }
+
   if (
-    state !== "ok" ||
-    (routeList.items.length === 0 &&
-      stopList.items.length === 0 &&
-      !journeyContent)
+    state !== "ok" &&
+    state !== "loading" &&
+    state !== "error" &&
+    state !== "no-match" &&
+    state !== "empty"
   ) {
     return null;
   }
+  if (
+    state === "ok" &&
+    routeList.items.length === 0 &&
+    stopList.items.length === 0 &&
+    !journeyContent
+  ) {
+    return null;
+  }
+  const note = statusNote();
   return (
     <div className="gonaj-results-list">
       <div role="tablist" aria-label="Result type" className="gonaj-tabs">
@@ -139,75 +158,89 @@ export default function ResultsList({
           Stops
         </button>
       </div>
-      {tab === "journey" && journeyContent}
-      {tab === "routes" && routeList.items.length > 0 && (
+      {tab === "journey" && (state === "ok" ? journeyContent : note)}
+      {tab === "routes" && (
         <section aria-label="Matching routes">
-          <h2>Routes</h2>
-          <ul>
-            {routeList.items.map((route) => (
-              <li key={route.id}>
-                <button type="button" onClick={() => onSelectRoute?.(route.id)}>
-                  <span className="gonaj-route-name">{routeLabel(route)}</span>
-                  {(route.operator || route.origin || route.destination) && (
-                    <span className="gonaj-route-meta">
-                      {[
-                        route.operator,
-                        [route.origin, route.destination]
-                          .filter(Boolean)
-                          .join(" → "),
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <Pager kind="routes" list={routeList} onPage={onRoutePage} />
+          <SearchBox onQuery={onQuery} value={text} onValueChange={setText} />
+          {state === "ok" && routeList.items.length > 0 ? (
+            <>
+              <h2>Routes</h2>
+              <ul>
+                {routeList.items.map((route) => (
+                  <li key={route.id}>
+                    <button type="button" onClick={() => onSelectRoute?.(route.id)}>
+                      <span className="gonaj-route-name">{routeLabel(route)}</span>
+                      {(route.operator || route.origin || route.destination) && (
+                        <span className="gonaj-route-meta">
+                          {[
+                            route.operator,
+                            [route.origin, route.destination]
+                              .filter(Boolean)
+                              .join(" → "),
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <Pager kind="routes" list={routeList} onPage={onRoutePage} />
+            </>
+          ) : (
+            note
+          )}
         </section>
       )}
-      {tab === "stops" && stopList.items.length > 0 && (
+      {tab === "stops" && (
         <section aria-label="Matching stops">
-          <h2>Stops</h2>
-          <ul>
-            {groupStopsByName(stopList.items).map((group) =>
-              group.members.length === 1 ? (
-                <li key={group.members[0].id}>
-                  <button type="button" onClick={() => onSelectStop?.(group.members[0])}>
-                    {group.members[0].name}
-                  </button>
-                </li>
-              ) : (
-                <li key={`group-${group.name}`}>
-                  <button
-                    type="button"
-                    aria-expanded={expanded === group.name}
-                    onClick={() =>
-                      setExpanded((current) => (current === group.name ? null : group.name))
-                    }
-                  >
-                    <span className="gonaj-route-name">{group.name}</span>
-                    <span className="gonaj-route-meta">
-                      {group.members.length} stops
-                    </span>
-                  </button>
-                  {expanded === group.name && (
-                    <ul className="gonaj-group-members">
-                      {group.members.map((stop) => (
-                        <li key={stop.id}>
-                          <button type="button" onClick={() => onSelectStop?.(stop)}>
-                            {stop.name}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              )
-            )}
-          </ul>
-          <Pager kind="stops" list={stopList} onPage={onStopPage} />
+          <SearchBox onQuery={onQuery} value={text} onValueChange={setText} />
+          {state === "ok" && stopList.items.length > 0 ? (
+            <>
+              <h2>Stops</h2>
+              <ul>
+                {groupStopsByName(stopList.items).map((group) =>
+                  group.members.length === 1 ? (
+                    <li key={group.members[0].id}>
+                      <button type="button" onClick={() => onSelectStop?.(group.members[0])}>
+                        {group.members[0].name}
+                      </button>
+                    </li>
+                  ) : (
+                    <li key={`group-${group.name}`}>
+                      <button
+                        type="button"
+                        aria-expanded={expanded === group.name}
+                        onClick={() =>
+                          setExpanded((current) => (current === group.name ? null : group.name))
+                        }
+                      >
+                        <span className="gonaj-route-name">{group.name}</span>
+                        <span className="gonaj-route-meta">
+                          {group.members.length} stops
+                        </span>
+                      </button>
+                      {expanded === group.name && (
+                        <ul className="gonaj-group-members">
+                          {group.members.map((stop) => (
+                            <li key={stop.id}>
+                              <button type="button" onClick={() => onSelectStop?.(stop)}>
+                                {stop.name}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  )
+                )}
+              </ul>
+              <Pager kind="stops" list={stopList} onPage={onStopPage} />
+            </>
+          ) : (
+            note
+          )}
         </section>
       )}
     </div>

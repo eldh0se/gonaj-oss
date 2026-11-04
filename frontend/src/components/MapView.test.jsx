@@ -211,6 +211,127 @@ describe("MapView candidate view", () => {
     expect(map.fitBounds).toHaveBeenCalledTimes(2);
   });
 
+  it("marks origin and destination distinctly with accessible labels", () => {
+    const onSelectStop = vi.fn();
+    const noop = () => {};
+    const stops = [
+      { id: 1, name: "Ernakulam South", lat: 9.97, lon: 76.28, role: "origin" },
+      { id: 2, name: "Marine Drive", lat: 9.975, lon: 76.285 },
+      { id: 3, name: "Fort Kochi", lat: 9.96, lon: 76.24, role: "terminus" },
+    ];
+    render(<MapView markers={stops} onAreaChange={noop} onSelectStop={onSelectStop} />);
+    const mock = leafletMock();
+    // Intermediates stay circle markers; endpoints become labelled pins.
+    expect(mock.L.circleMarker).toHaveBeenCalledTimes(1);
+    expect(mock.L.circleMarker.mock.calls[0][0]).toEqual([9.975, 76.285]);
+    expect(mock.L.marker).toHaveBeenCalledTimes(2);
+    expect(mock.L.marker.mock.calls[0][0]).toEqual([9.97, 76.28]);
+    expect(mock.L.marker.mock.calls[0][1]).toMatchObject({
+      title: "Origin: Ernakulam South",
+    });
+    expect(mock.L.marker.mock.calls[1][1]).toMatchObject({
+      title: "Destination: Fort Kochi",
+    });
+    for (const call of mock.L.marker.mock.calls) {
+      expect(call[1].icon).toBeTruthy();
+    }
+    // Endpoint taps still select the stop.
+    const pin = mock.L.marker.mock.results[0].value;
+    pin.on.mock.calls.find(([event]) => event === "click")[1]();
+    expect(onSelectStop).toHaveBeenCalledWith(stops[0]);
+  });
+
+  it("names stops permanently once the view holds a handful", () => {
+    const noop = () => {};
+    render(
+      <MapView
+        markers={[
+          { id: 1, name: "Stop A", lat: 9.97, lon: 76.28 },
+          { id: 2, name: "Stop B", lat: 9.98, lon: 76.29 },
+          { id: 3, name: "Far Away", lat: 11.0, lon: 77.0 },
+        ]}
+        onAreaChange={noop}
+      />
+    );
+    const mock = leafletMock();
+    // Two of three in bounds: every rendered pin carries its name.
+    const bound = mock.L.circleMarker.mock.results.map((r) => r.value);
+    expect(bound).toHaveLength(3);
+    const names = bound.flatMap((layer) =>
+      layer.bindTooltip.mock.calls.map(([content, opts]) => [content, opts.permanent])
+    );
+    expect(names).toEqual([
+      ["Stop A", true],
+      ["Stop B", true],
+      ["Far Away", true],
+    ]);
+    for (const layer of bound) {
+      expect(layer.bindTooltip.mock.calls[0][1]).toMatchObject({
+        direction: "top",
+        className: "gonaj-marker-label",
+      });
+    }
+  });
+
+  it("shrinks labels to compact in the dense-but-wanted band", () => {
+    const noop = () => {};
+    // Fifteen in view: labelled, but compact to avoid clutter.
+    const dense = Array.from({ length: 15 }, (_, i) => ({
+      id: 200 + i,
+      name: `Dense ${i}`,
+      lat: 9.95 + i * 0.002,
+      lon: 76.25 + i * 0.002,
+    }));
+    render(<MapView markers={dense} onAreaChange={noop} />);
+    const mock = leafletMock();
+    const bound = mock.L.circleMarker.mock.results.map((r) => r.value);
+    expect(bound).toHaveLength(15);
+    for (const layer of bound) {
+      expect(layer.bindTooltip).toHaveBeenCalledTimes(1);
+      expect(layer.bindTooltip.mock.calls[0][0]).toMatch(/^Dense /);
+      expect(layer.bindTooltip.mock.calls[0][1]).toMatchObject({
+        permanent: true,
+        className: "gonaj-marker-label is-compact",
+      });
+    }
+    // The uncrowded band stays full-size (no compact flag).
+    expect(
+      bound.flatMap((layer) => layer.bindTooltip.mock.calls)
+    ).toHaveLength(15);
+  });
+
+  it("leaves crowded views bare and labels again after zooming in", () => {
+    const noop = () => {};
+    // Thirty stops in view: too dense for permanent labels.
+    const crowded = Array.from({ length: 30 }, (_, i) => ({
+      id: 100 + i,
+      name: `Stop ${i}`,
+      lat: 9.95 + i * 0.001,
+      lon: 76.25 + i * 0.001,
+    }));
+    render(<MapView markers={crowded} onAreaChange={noop} />);
+    let mock = leafletMock();
+    expect(
+      mock.layers.flatMap((layer) => layer.bindTooltip.mock.calls)
+    ).toHaveLength(0);
+    // Zooming in past the threshold (five in bounds) labels the pins.
+    lastMap().getBounds = vi.fn(() => ({
+      getWest: () => 76.27,
+      getSouth: () => 9.975,
+      getEast: () => 76.29,
+      getNorth: () => 9.99,
+    }));
+    act(() => {
+      leafletMock().fire(lastMap(), "moveend");
+    });
+    mock = leafletMock();
+    const names = mock.layers.flatMap((layer) =>
+      layer.bindTooltip.mock.calls.map(([content]) => content)
+    );
+    expect(names.length).toBeGreaterThan(0);
+    expect(names).toContain("Stop 25");
+  });
+
   it("highlights candidate pins distinctly", () => {
     const noop = () => {};
     render(

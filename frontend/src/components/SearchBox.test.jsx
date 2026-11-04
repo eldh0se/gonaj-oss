@@ -215,4 +215,36 @@ describe("ResultsList", () => {
     fireEvent.click(screen.getByRole("button", { name: /Next stops page/ }));
     expect(onStopPage).not.toHaveBeenCalled();
   });
+
+  it("shows no main search box on the Journey tab", () => {
+    const noop = () => {};
+    render(
+      <ResultsList routeList={ROUTE_LIST} stopList={STOP_LIST} state="ok" errorDetail="" onSelectRoute={noop} onSelectStop={noop} onQuery={noop} journeyContent={<p>Journey helper lives here</p>} />
+    );
+    expect(screen.queryByRole("search")).toBeNull();
+  });
+
+  it("scopes one search box each to the Routes and Stops tabs", () => {
+    vi.useFakeTimers();
+    const onQuery = vi.fn();
+    render(
+      <ResultsList routeList={ROUTE_LIST} stopList={STOP_LIST} state="ok" errorDetail="" onSelectRoute={() => {}} onSelectStop={() => {}} onQuery={onQuery} />
+    );
+    // Routes panel: exactly one search box, debounced as before.
+    expect(screen.getAllByRole("search")).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText(/search routes and stops/i), {
+      target: { value: "Fort" },
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(onQuery).toHaveBeenLastCalledWith("Fort");
+    // Stops panel: its own search box; back to routes keeps a single box.
+    fireEvent.click(screen.getByRole("tab", { name: "Stops" }));
+    expect(screen.getAllByRole("search")).toHaveLength(1);
+    expect(screen.getByLabelText(/search routes and stops/i).value).toBe("Fort");
+    fireEvent.click(screen.getByRole("tab", { name: "Routes" }));
+    expect(screen.getAllByRole("search")).toHaveLength(1);
+    vi.useRealTimers();
+  });
 });

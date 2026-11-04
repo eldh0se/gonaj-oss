@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import MapView from "./components/MapView.jsx";
-import SearchBox from "./components/SearchBox.jsx";
 import ResultsList from "./components/ResultsList.jsx";
 import RouteOverlay from "./components/RouteOverlay.jsx";
 import JourneyPanel from "./components/JourneyPanel.jsx";
@@ -19,6 +18,25 @@ function toBbox(bounds) {
 }
 
 const emptyListResult = () => ({ items: [], page: 1, totalPages: 1, count: 0 });
+
+// Visible build version (016 FR-008): full `v{version}+{sha7} · built {UTC}`
+// when build metadata exists, plain `v{version}` fallback otherwise.
+function appVersionLabel() {
+  const version =
+    typeof __APP_VERSION__ !== "undefined" && __APP_VERSION__
+      ? __APP_VERSION__
+      : "0.1.0";
+  const sha =
+    typeof __APP_SHA__ !== "undefined" && __APP_SHA__
+      ? String(__APP_SHA__).slice(0, 7)
+      : "";
+  const builtAt =
+    typeof __APP_BUILT_AT__ !== "undefined" && __APP_BUILT_AT__
+      ? __APP_BUILT_AT__
+      : "";
+  const base = sha ? `v${version}+${sha}` : `v${version}`;
+  return builtAt ? `${base} · built ${builtAt}` : base;
+}
 
 function toListResult(body) {
   return {
@@ -178,9 +196,42 @@ export function MapPage() {
     return () => controller.abort();
   }, [routeId]);
 
-  const highlight =
+  // Route focus (016): while a route detail is open, the map shows only
+  // that route's stops (area markers hidden), fits the route bounds, and
+  // marks endpoints by role. Close restores area markers via the null path.
+  const routeStops =
     overlay.detail && (overlay.state === "ok" || overlay.state === "empty")
-      ? (overlay.detail.stops ?? []).map((s) => [s.stop.lat, s.stop.lon])
+      ? (overlay.detail.stops ?? [])
+          .filter(
+            (s) =>
+              typeof s?.stop?.lat === "number" &&
+              typeof s?.stop?.lon === "number"
+          )
+          .map((s) => ({
+            id: s.stop.id,
+            name: s.stop.name,
+            lat: s.stop.lat,
+            lon: s.stop.lon,
+            role: s.is_origin
+              ? "origin"
+              : s.is_terminus
+                ? "terminus"
+                : undefined,
+          }))
+      : null;
+
+  const highlight = routeStops
+    ? routeStops.map((m) => [m.lat, m.lon])
+    : null;
+
+  const routeBounds =
+    routeStops && routeStops.length > 0
+      ? {
+          south: Math.min(...routeStops.map((m) => m.lat)),
+          west: Math.min(...routeStops.map((m) => m.lon)),
+          north: Math.max(...routeStops.map((m) => m.lat)),
+          east: Math.max(...routeStops.map((m) => m.lon)),
+        }
       : null;
 
   const handleSelectRoute = useCallback(
@@ -254,14 +305,14 @@ export function MapPage() {
       <div className="gonaj-body">
         <section className="gonaj-map-wrap" aria-label="Transport map">
           <MapView
-            markers={area.markers}
+            markers={routeStops ?? area.markers}
             highlight={highlight}
             center={center}
             selectedId={
               stopCard?.state === "ok" && stopCard.detail ? stopCard.detail.id : null
             }
             highlightIds={(candidateView?.stops ?? []).map((s) => s.id)}
-            fitBounds={candidateView?.bounds ?? null}
+            fitBounds={routeBounds ?? candidateView?.bounds ?? null}
             onAreaChange={handleAreaChange}
             onSelectStop={handleMapTap}
           />
@@ -287,7 +338,6 @@ export function MapPage() {
         </section>
 
         <aside className="gonaj-results" aria-label="Search results">
-          <SearchBox onQuery={handleQuery} />
           <ResultsList
             routeList={search.routes}
             stopList={search.stops}
@@ -297,6 +347,7 @@ export function MapPage() {
             onSelectStop={handleSelectStop}
             onRoutePage={setRoutePage}
             onStopPage={setStopPage}
+            onQuery={handleQuery}
             journeyContent={
               <JourneyPanel
                 onShowCandidates={handleShowCandidates}
@@ -306,6 +357,10 @@ export function MapPage() {
           />
         </aside>
       </div>
+
+      <footer className="gonaj-version" data-testid="app-version">
+        {appVersionLabel()}
+      </footer>
 
       {routeId && overlay.state !== "idle" ? (
         <RouteOverlay
