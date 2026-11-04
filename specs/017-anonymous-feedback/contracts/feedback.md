@@ -36,7 +36,7 @@ Dialog shows the `reference` only, plus: report received but not verified; repor
 ## C3 — Shared dialog (FR-001…FR-005, UI-level)
 
 - Four entries (header, route overlay, stop card, journey answer) open the same dialog; no route change; map state untouched.
-- Context prefills removable chips; empty state allowed; chips searchable via existing endpoints.
+- Context prefills removable chips; empty state allowed; no in-dialog search.
 - Category required (four options); message required (live 2000-char guidance, strip-checked on submit).
 - Submit disabled while pending (single record guaranteed); errors render inline with draft preserved and a retry action.
 - Receipt view replaces the form on 201; closing returns to the unchanged map.

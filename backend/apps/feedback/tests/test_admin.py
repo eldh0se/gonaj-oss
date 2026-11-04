@@ -13,7 +13,7 @@ class FeedbackAdminTest(TestCase):
         assert model_admin is not None, "FeedbackReport not registered in Admin"
 
         report = FeedbackReport.objects.create(
-            reference="FB-ADMIN0001",
+            reference="FB-ADMIN001",
             category="incorrect",
             message="Wrong terminus.",
         )

@@ -40,17 +40,16 @@ A passenger viewing a route overlay, a stop card, or a journey answer spots some
 
 ### User Story 2 - Report a general issue with no context (Priority: P1)
 
-A passenger notices a problem that is not tied to anything on screen (or starts from the header) and taps Report issue. The same dialog opens with no chips; the passenger may search for and attach route/stop chips, or leave it general, then files the report and gets the same receipt.
+A passenger notices a problem that is not tied to anything on screen (or starts from the header) and taps Report issue. The same dialog opens with no chips; the passenger files it general and gets the same receipt.
 
 **Why this priority**: Many real reports (a missing stop, a wrong name seen offline) start with no context on screen; without this path those reports are lost.
 
-**Independent Test**: Open the header entry point with an empty map context, file one report with searched-and-attached chips and one with no chips, and confirm both return receipts.
+**Independent Test**: Open the header entry point with an empty map context, file one report with no chips, and confirm the receipt.
 
 **Acceptance Scenarios**:
 
 1. **Given** the header Report issue entry, **When** the passenger opens it, **Then** the same dialog opens with no chips and the map unchanged.
-2. **Given** an empty dialog, **When** the passenger searches, **Then** existing route/stop search offers attachable chips.
-3. **Given** a chip attached by mistake, **When** the passenger removes it, **Then** submission proceeds as general feedback.
+2. **Given** a contextual dialog, **When** the passenger removes a prefilled chip, **Then** submission proceeds without that context.
 
 ---
 
@@ -102,7 +101,7 @@ A passenger submits with an empty message, an over-long message, a stale route r
 ### Functional Requirements
 
 - **FR-001**: Four entry points (route overlay, stop card, journey result, generic header) MUST open one shared report dialog; no new page or route is added and map state MUST be preserved behind it.
-- **FR-002**: The dialog MUST prefill route/stop/journey context as editable, removable chips backed by the existing route/stop search, and MUST accept general feedback with no chips attached.
+- **FR-002**: The dialog MUST prefill route/stop/journey context as removable chips from the entry context (no in-dialog search), and MUST accept general feedback with no chips attached.
 - **FR-003**: Submission MUST require a category of incorrect, missing, outdated, or other, and a user-typed message of 1–2000 characters after stripping whitespace (the limit applies to the user message; the server-composed journey header is excluded).
 - **FR-004**: The dialog MUST block duplicate submission while a request is pending (at most one record per user submit).
 - **FR-005**: The dialog MUST handle loading, client validation, 400, 429, and other errors with plain-language messages and a retry path that preserves the draft.
@@ -115,7 +114,7 @@ A passenger submits with an empty message, an over-long message, a stale route r
 ### Key Entities
 
 - **FeedbackReport**: A passenger's report — unique receipt reference, category, message (embedding any journey ends as text), optional links to one route and one stop that clear on deletion, review status, timestamps. Never modified by public endpoints after creation.
-- **ReportChip**: Transient dialog attachment — a route, stop, or journey end the passenger can add via search or remove before submitting; carries no persistence of its own.
+- **ReportChip**: Transient dialog attachment — a route, stop, or journey end prefilled from the entry context that the passenger can remove before submitting; carries no persistence of its own.
 
 ## Success Criteria *(mandatory)*
 

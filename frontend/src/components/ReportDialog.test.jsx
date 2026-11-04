@@ -73,6 +73,41 @@ describe("ReportDialog", () => {
     expect(posts[0].stop_id).toBeUndefined();
   });
 
+  it("removes a prefilled chip and submits without its context", async () => {
+    const posts = [];
+    const fetch = vi.fn(async (url, init) => {
+      if (String(url).includes("/feedback/")) {
+        posts.push(JSON.parse(init.body));
+      }
+      return {
+        ok: true,
+        json: async () => ({ reference: "FB-NOCHIP001", receipt: "received" }),
+      };
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(
+      <ReportDialog
+        open
+        context={{ route: { id: 7, name: "R7" } }}
+        onClose={() => {}}
+      />
+    );
+    expect(screen.getByText("Route: R7")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /remove route: r7/i }));
+    expect(screen.queryByText("Route: R7")).toBeNull();
+    fireEvent.change(screen.getByLabelText(/category/i), {
+      target: { value: "incorrect" },
+    });
+    fireEvent.change(screen.getByLabelText(/message/i), {
+      target: { value: "No longer applies." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send report/i }));
+    expect(await screen.findByTestId("feedback-receipt")).toBeTruthy();
+    expect(posts).toHaveLength(1);
+    expect(posts[0].route_id).toBeUndefined();
+    expect(posts[0].stop_id).toBeUndefined();
+  });
+
   it("blocks empty submit with inline validation and no request", () => {
     const fetch = vi.fn(async () => ({
       ok: true,

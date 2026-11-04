@@ -223,3 +223,12 @@ With multiple developers:
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same-file parallel edits, cross-story dependencies that break independence
 - Total: 20 tasks (T001–T020); per story: Setup 2, Foundational 3, US1 5, US2 2, US3 2, US4 4, Polish 2
+
+---
+
+## Phase 8: Convergence
+
+**Purpose**: Close the two LOW gaps found by `/speckit-converge` (no constitution violations; behavior already approved)
+
+- [X] T021 Align the in-dialog-search wording with the approved no-search direction in `specs/017-anonymous-feedback/spec.md` (FR-002, US2/AC2, ReportChip entity) and `specs/017-anonymous-feedback/contracts/feedback.md` (C3 chip-search bullet) per FR-002 (contradicts)
+- [X] T022 [P] [US1] Add a `ReportDialog` test in `frontend/src/components/ReportDialog.test.jsx` that removes a prefilled route chip via its × button, submits, and asserts the POST carries no `route_id`/`stop_id` per US1/AC4 (partial)
