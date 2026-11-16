@@ -765,10 +765,14 @@ export default function JourneyPanel({
             <p className="gonaj-unverified">
               Journey agent can make mistakes, Check important info
             </p>
-            {state.payload.meta?.model &&
+            {state.payload.meta?.resolution === "local-matrix" ? (
+              <p>Answer from local dataset.</p>
+            ) : (
+              state.payload.meta?.model &&
               state.payload.meta.model !== "none" && (
                 <p>Answer generated using {state.payload.meta.model}.</p>
-              )}
+              )
+            )}
             <p>{state.payload.answer}</p>
             {onReportIssue && (
               <button

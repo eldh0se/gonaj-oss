@@ -417,3 +417,57 @@ class TranscribeMetaTests(TestCase):
         output = "\n".join(logs.output)
         self.assertIn(settings.TRANSCRIBE_MODEL, output)
         self.assertNotIn("secret-transcript-marker-7712", output)
+
+
+class LocalMatrixMetaTests(ApiTestCase):
+    """T002: local from-to answer carries local-matrix provenance (US1).
+
+    Failing-first: `_fresh_matrix_answer()` is deterministic (no model),
+    so `complete_with_tools` must stay uncalled and `meta` must be the
+    local-fallback shape plus `resolution="local-matrix"`.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.transport.tests import factories as f
+
+        _, cls.import_run = f.make_snapshot(label="factory-local-meta")
+        cls.master = f.make_master(
+            cls.import_run, 41, "Loop", operator="KSRTC", network="Kochi"
+        )
+        cls.south = f.make_stop(
+            cls.import_run, 501, "Ernakulam South", 9.97, 76.28
+        )
+        cls.fort = f.make_stop(
+            cls.import_run, 502, "Fort Kochi", 9.97, 76.24
+        )
+        cls.route = f.make_route(
+            cls.import_run, 501, "South-Fort", from_text="", to_text=""
+        )
+        f.link_master(cls.import_run, cls.master, cls.route, 1)
+        f.link_stop(cls.import_run, cls.route, cls.south, 1)
+        f.link_stop(cls.import_run, cls.route, cls.fort, 2)
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self._real = provider.complete_with_tools
+
+    def tearDown(self):
+        provider.complete_with_tools = self._real
+
+    @override_settings(MODEL_API_KEY="")
+    def test_fresh_from_to_uses_local_matrix_meta_without_model_call(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        body = self.client.post(
+            "/api/v1/journey/",
+            {"question": "How do I get from Ernakulam South to Fort Kochi?"},
+            format="json",
+        ).json()
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["meta"]["model"], "none")
+        self.assertEqual(body["meta"]["provider"], "local-fallback")
+        self.assertEqual(body["meta"]["resolution"], "local-matrix")
+        self.assertIsInstance(body["meta"]["latency_ms"], int)
+        self.assertEqual(stub.calls, 0)

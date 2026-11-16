@@ -324,6 +324,13 @@ def _selection_meta(latency_ms):
     return meta
 
 
+def _local_meta(latency_ms):
+    """Local-matrix meta: deterministic dataset answer, no model call."""
+    meta = _meta(latency_ms, fallback=True)
+    meta["resolution"] = "local-matrix"
+    return meta
+
+
 UNKNOWN_OPERATOR = "Other services"
 
 
@@ -1749,6 +1756,21 @@ def run_journey(*, question, history=(), context=None, page=1, page_size=5):
         )
         return payload, tracker["tools_used"]
 
+    def local_finish(payload):
+        latency_ms = int((time.monotonic() - started) * 1000)
+        meta = _local_meta(latency_ms)
+        payload["meta"] = meta
+        _log(meta["model"], meta["provider"], latency_ms, tracker["tools_used"])
+        _release_request_log_buffer(keep=(payload.get("status") != "ok"))
+        logger.debug(
+            "journey agent decision=%s fallback=%s resolution=%s tools_used=%s",
+            payload.get("status"),
+            True,
+            "local-matrix",
+            tracker["tools_used"],
+        )
+        return payload, tracker["tools_used"]
+
     def fallback():
         for route_id, (from_id, to_id) in tracker["findings"].items():
             route = _verify_route(route_id, from_id, to_id, tracker)
@@ -1781,7 +1803,7 @@ def run_journey(*, question, history=(), context=None, page=1, page_size=5):
                 payload = ranked_payload(
                     ranked, route, from_id, to_id, ""
                 )
-                return finish(payload)
+                return local_finish(payload)
             logger.debug(
                 "journey agent fresh-matrix decision=%s problem=%s",
                 "pick" if problem[0] in ("unknown", "truncated") else "refuse",
@@ -1789,22 +1811,22 @@ def run_journey(*, question, history=(), context=None, page=1, page_size=5):
             )
             if problem[0] == "unknown":
                 _, slot = problem
-                return finish(
+                return local_finish(
                     _pick_payload(slot, [], None, _UNKNOWN_PLACE)
                 )
             if problem[0] == "truncated":
                 _, slot, ids = problem
-                return finish(
+                return local_finish(
                     _pick_payload(slot, ids, None, _TRUNCATED_MESSAGE)
                 )
             if problem[0] == "zoom_in":
-                return finish(
+                return local_finish(
                     {
                         "status": "refuse",
                         "message": problem[1] or _UNKNOWN_PLACE,
                     }
                 )
-            return finish({"status": "refuse", "message": _NO_DIRECT})
+            return local_finish({"status": "refuse", "message": _NO_DIRECT})
 
     try:
         draft = ""

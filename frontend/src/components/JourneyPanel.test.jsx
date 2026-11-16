@@ -400,6 +400,29 @@ describe("JourneyPanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("hides generated-using for local-matrix and shows dataset label", async () => {
+    mockFetch({
+      ...OK_PAYLOAD,
+      meta: {
+        model: "none",
+        provider: "local-fallback",
+        resolution: "local-matrix",
+        latency_ms: 12,
+      },
+    });
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText(/your journey question/i), {
+      target: { value: "How do I get from Ernakulam South to Fort Kochi?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    expect(
+      await screen.findByText(/take the south-fort service/i)
+    ).toBeTruthy();
+    expect(screen.queryByText(/generated using/i)).toBeNull();
+    expect(await screen.findByText(/local dataset/i)).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+
   it("clears direct and ask modes when the other starts", async () => {
     const fetch = vi.fn(async (url, options) => {
       const target = String(url);

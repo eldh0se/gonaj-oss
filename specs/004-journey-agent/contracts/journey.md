@@ -55,7 +55,13 @@ the plain-language `400`.
 - `meta.model` is the declared model (or `none` for the
   fallback), `meta.provider` its provider (or
   `local-fallback`), `meta.latency_ms` the measured producing
-  latency.
+  latency. `meta.resolution` marks local provenance only:
+  `"local-matrix"` for deterministic dataset answers from the
+  fresh from-to matrix path (no model call), `"selection"` for
+  local answers that resolve a prior disambiguation pick, and
+  absent for model-generated answers and for the model-outage
+  fallback (which keeps `model: "none"` /
+  `provider: "local-fallback"` with no `resolution` key).
 
 Ranked answers (010, reshaped flat by 014) add fields documented
 in full in
@@ -104,7 +110,11 @@ resolved}`; the server also accepts typed picks (exact name or
 1-based position matching exactly one candidate) by deriving
 `selected_stop_id` itself. Selection answers carry
 `meta.resolution: "selection"` alongside
-`model: "none", provider: "local-fallback"`; the model-outage
+`model: "none", provider: "local-fallback"`; deterministic
+fresh from-to answers (ok, disambiguate pick, or plain refusal
+from `_fresh_matrix_answer()` with zero model calls) carry
+`meta.resolution: "local-matrix"` with the same
+`model`/`provider`; the model-outage
 fallback keeps the same `model`/`provider` with no `resolution`
 key.
 

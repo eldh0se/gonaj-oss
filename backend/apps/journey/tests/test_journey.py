@@ -132,9 +132,12 @@ class JourneyTests(ApiTestCase):
         self.assertEqual(
             body["routes"][0]["evidence"], f"/routes/{self.route.id}"
         )
-        self.assertEqual(body["meta"]["model"], "muse-spark-1.3")
-        self.assertEqual(body["meta"]["provider"], "meta")
+        # Deterministic fresh-matrix path: no model call, local provenance.
+        self.assertEqual(body["meta"]["model"], "none")
+        self.assertEqual(body["meta"]["provider"], "local-fallback")
+        self.assertEqual(body["meta"]["resolution"], "local-matrix")
         self.assertIsInstance(body["meta"]["latency_ms"], int)
+        self.assertEqual(stub.calls, 0)
         for banned in ("10:30", "minutes", "transfer", "change at"):
             self.assertNotIn(banned, body["answer"])
         detail = self.client.get(f"/api/v1/routes/{self.route.id}/")
@@ -1092,3 +1095,128 @@ class MapChoiceBackendTests(ApiTestCase):
         for candidate in body["candidates"]:
             self.assertIsInstance(candidate["lat"], float)
             self.assertIsInstance(candidate["lon"], float)
+
+
+class LocalFreshRefusalTests(ApiTestCase):
+    """T003: local-path refusals carry local-matrix provenance (US1).
+
+    Failing-first: unknown / truncated / zoom_in / no-viable from the
+    deterministic `_fresh_matrix_answer()` path must use the same local
+    meta as answers (`model="none"`, `provider="local-fallback"`,
+    `resolution="local-matrix"`) with zero model calls.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        _, cls.import_run = f.make_snapshot(label="factory-local-refusal")
+        cls.master = f.make_master(
+            cls.import_run, 71, "AreaLoop", operator="KSRTC", network="Kochi"
+        )
+        cls.a1 = f.make_stop(cls.import_run, 701, "Aluva", 10.1100, 76.3500)
+        cls.a2 = f.make_stop(cls.import_run, 702, "Aluva", 10.1102, 76.3501)
+        cls.a3 = f.make_stop(cls.import_run, 703, "Aluva", 10.1098, 76.3499)
+        cls.k1 = f.make_stop(cls.import_run, 712, "Kaloor", 9.9900, 76.2900)
+        cls.k2 = f.make_stop(cls.import_run, 713, "Kaloor", 9.9902, 76.2901)
+        cls.k3 = f.make_stop(cls.import_run, 714, "Kaloor", 9.9898, 76.2899)
+        cls.k4 = f.make_stop(cls.import_run, 715, "Kaloor", 10.0500, 76.3500)
+        cls.k5 = f.make_stop(cls.import_run, 716, "Kaloor", 10.0501, 76.3501)
+        cls.lonely = f.make_stop(cls.import_run, 991, "Lonely", 9.80, 76.20)
+        cls.route1 = f.make_route(
+            cls.import_run, 721, "Aluva-East", from_text="", to_text=""
+        )
+        f.link_master(cls.import_run, cls.master, cls.route1, 1)
+        f.link_stop(cls.import_run, cls.route1, cls.a1, 1)
+        f.link_stop(cls.import_run, cls.route1, cls.k1, 2)
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self._real = provider.complete_with_tools
+
+    def tearDown(self):
+        provider.complete_with_tools = self._real
+
+    def assertLocalMeta(self, body, stub):
+        self.assertEqual(body["meta"]["model"], "none")
+        self.assertEqual(body["meta"]["provider"], "local-fallback")
+        self.assertEqual(body["meta"]["resolution"], "local-matrix")
+        self.assertIsInstance(body["meta"]["latency_ms"], int)
+        self.assertEqual(stub.calls, 0)
+
+    @override_settings(MODEL_API_KEY="")
+    def test_unknown_uses_local_meta(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        body = self.client.post(
+            "/api/v1/journey/",
+            {"question": "How do I get from Aluva to Zzxq?"},
+            format="json",
+        ).json()
+        self.assertEqual(body["status"], "disambiguate")
+        self.assertEqual(body["slot"], "to")
+        self.assertLocalMeta(body, stub)
+
+    @override_settings(MODEL_API_KEY="")
+    def test_no_viable_uses_local_meta(self):
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        body = self.client.post(
+            "/api/v1/journey/",
+            {"question": "How do I get from Aluva to Lonely?"},
+            format="json",
+        ).json()
+        self.assertEqual(body["status"], "refuse")
+        self.assertLocalMeta(body, stub)
+
+    @override_settings(MODEL_API_KEY="")
+    def test_truncated_uses_local_meta(self):
+        from unittest import mock
+
+        from apps.journey import tools as tools_module
+
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        with mock.patch.object(tools_module, "MATRIX_PAIR_CAP", 4):
+            body = self.client.post(
+                "/api/v1/journey/",
+                {"question": "How do I get from Aluva to Kaloor?"},
+                format="json",
+            ).json()
+        self.assertEqual(body["status"], "disambiguate")
+        self.assertTrue(len(body["offered_ids"]) > 0)
+        self.assertLocalMeta(body, stub)
+
+    @override_settings(MODEL_API_KEY="")
+    def test_zoom_in_uses_local_meta(self):
+        from unittest import mock
+
+        from apps.journey import agent as agent_module
+
+        stub = StubModel(script=[])
+        provider.complete_with_tools = stub
+        real_places = agent_module._TOOL_FUNCTIONS["search_places"]
+
+        def zoom_once(**kwargs):
+            query = (kwargs.get("query") or "").lower()
+            if "aluva" in query:
+                return {
+                    "ok": True,
+                    "status": "zoom_in",
+                    "groups": [],
+                    "exact": True,
+                    "detail": "That area is too large to list stops for. "
+                    "Please zoom in and try again.",
+                }
+            return real_places(**kwargs)
+
+        with mock.patch.dict(
+            agent_module._TOOL_FUNCTIONS, {"search_places": zoom_once}
+        ):
+            body = self.client.post(
+                "/api/v1/journey/",
+                {"question": "How do I get from Aluva to Kaloor?"},
+                format="json",
+            ).json()
+        self.assertEqual(body["status"], "refuse")
+        self.assertIn("zoom in", body["message"].lower())
+        self.assertLocalMeta(body, stub)
