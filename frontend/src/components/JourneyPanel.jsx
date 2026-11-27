@@ -242,10 +242,17 @@ function JourneyOptionCards({ options, filter, walkNote }) {
 
 const TAP_MS = 300;
 
+// Temporarily hidden until higher-priority features mature (004 US1/US3,
+// 013 voice fix, 016 UX polish). Re-enable by setting
+// ASK_DICTATE_ENABLED to true or passing showAskDictate.
+// Backend /api/v1/journey/ and /api/v1/journey/transcribe/ are left intact.
+const ASK_DICTATE_ENABLED = false;
+
 export default function JourneyPanel({
   onShowCandidates,
   chooseRef,
   onReportIssue,
+  showAskDictate = ASK_DICTATE_ENABLED,
 } = {}) {
   const [question, setQuestion] = useState("");
   const [state, setState] = useState({ status: "idle" });
@@ -631,6 +638,8 @@ export default function JourneyPanel({
 
   return (
     <section aria-label="Journey helper" className="gonaj-journey">
+      {showAskDictate && (
+      <>
       <h2>Journey helper</h2>
       <p>Plain-language answers about direct services, with evidence.</p>
       <form
@@ -681,6 +690,8 @@ export default function JourneyPanel({
       <div className="gonaj-journey-or" role="separator">
         <span>OR</span>
       </div>
+      </>
+      )}
 
       <div className="gonaj-journey-stops">
       <StopPicker

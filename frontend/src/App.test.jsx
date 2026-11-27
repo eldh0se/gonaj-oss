@@ -93,7 +93,8 @@ describe("App map page", () => {
     delete globalThis.navigator.geolocation;
   });
 
-  it("retains journey results after the route overlay is closed", async () => {
+  // Temporarily hidden with Journey Ask/Dictate (004 US1/US3); re-enable with that UI.
+  it.skip("retains journey results after the route overlay is closed", async () => {
     const journeyPayload = {
       status: "ok",
       answer: "Take R7 from Kaloor to Fort Kochi.",
@@ -331,14 +332,14 @@ describe("App map page", () => {
     expect(
       screen.getByRole("tab", { name: "Journey" }).getAttribute("aria-selected")
     ).toBe("true");
-    expect(screen.getByText(/plain-language answers/i)).toBeTruthy();
+    expect(screen.getByLabelText(/from stop/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /^close$/i }));
     // Close restores the tab content with no search state lost.
     expect(screen.queryByRole("heading", { name: "R7" })).toBeNull();
     expect(
       screen.getByRole("tab", { name: "Journey" }).getAttribute("aria-selected")
     ).toBe("true");
-    expect(screen.getByText(/plain-language answers/i)).toBeTruthy();
+    expect(screen.getByLabelText(/from stop/i)).toBeTruthy();
     vi.unstubAllGlobals();
   });
 

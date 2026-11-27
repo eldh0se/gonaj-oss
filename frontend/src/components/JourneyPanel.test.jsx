@@ -29,12 +29,36 @@ describe("JourneyPanel", () => {
     localStorage.clear();
   });
 
+  it("hides Ask input by default while direct search stays available", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("must not be called");
+    }));
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    expect(screen.queryByRole("heading", { name: /journey helper/i })).toBeNull();
+    expect(screen.queryByText(/plain-language answers about direct services/i)).toBeNull();
+    expect(screen.queryByLabelText(/your journey question/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^ask$/i })).toBeNull();
+    expect(screen.getByLabelText(/from stop/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /find direct routes/i })).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+
+  it("hides Dictate input by default", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("must not be called");
+    }));
+    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    expect(screen.queryByRole("button", { name: /dictate/i })).toBeNull();
+    expect(screen.queryByText(/press and hold to record/i)).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   it("asks a typed question without fetching on mount", () => {
     const fetch = vi.fn(async () => {
       throw new Error("must not be called");
     });
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     expect(
       screen.getByRole("heading", { name: /journey helper/i })
     ).toBeTruthy();
@@ -48,7 +72,7 @@ describe("JourneyPanel", () => {
 
   it("renders an evidence-grounded answer with a working link", async () => {
     mockFetch(OK_PAYLOAD);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from Ernakulam South to Fort Kochi?" },
     });
@@ -62,7 +86,7 @@ describe("JourneyPanel", () => {
 
   it("renders a plain refusal with no links", async () => {
     mockFetch(REFUSE_PAYLOAD);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get somewhere unknown?" },
     });
@@ -84,7 +108,7 @@ describe("JourneyPanel", () => {
     };
     const fetch = vi.fn(async () => ({ ok: true, json: async () => disambiguate }));
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North?" },
     });
@@ -128,7 +152,7 @@ describe("JourneyPanel", () => {
       return { ok: true, json: async () => payload };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North?" },
     });
@@ -191,7 +215,7 @@ describe("JourneyPanel", () => {
       return { ok: true, json: async () => payload };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from Aluva to Kaloor?" },
     });
@@ -211,7 +235,7 @@ describe("JourneyPanel", () => {
   });
 
   it("says plainly when voice input is unavailable", async () => {
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.pointerDown(screen.getByRole("button", { name: /dictate/i }));
     expect(await screen.findByText(/voice input is not available/i)).toBeTruthy();
   });
@@ -286,7 +310,7 @@ describe("JourneyPanel", () => {
     vi.stubGlobal("AudioContext", MockAudioContext);
     vi.stubGlobal("OfflineAudioContext", MockOfflineAudioContext);
 
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     const dictate = screen.getByRole("button", { name: /dictate/i });
     fireEvent.pointerDown(dictate);
     await screen.findByText(/listening/i);
@@ -346,7 +370,7 @@ describe("JourneyPanel", () => {
     }
     vi.stubGlobal("AudioContext", FailingAudioContext);
 
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     const dictate = screen.getByRole("button", { name: /dictate/i });
     fireEvent.pointerDown(dictate);
     await screen.findByText(/listening/i);
@@ -360,7 +384,7 @@ describe("JourneyPanel", () => {
 
   it("labels answers with the journey agent disclaimer", async () => {
     mockFetch(OK_PAYLOAD);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get there?" },
     });
@@ -374,7 +398,7 @@ describe("JourneyPanel", () => {
 
   it("names the model that generated the answer", async () => {
     mockFetch(OK_PAYLOAD);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get there?" },
     });
@@ -388,7 +412,7 @@ describe("JourneyPanel", () => {
   it("hides the model line when the answer carries no model", async () => {
     const { meta, ...rest } = OK_PAYLOAD;
     mockFetch(rest);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get there?" },
     });
@@ -410,7 +434,7 @@ describe("JourneyPanel", () => {
         latency_ms: 12,
       },
     });
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from Ernakulam South to Fort Kochi?" },
     });
@@ -452,7 +476,7 @@ describe("JourneyPanel", () => {
       };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
 
     // Seed ask state, then start direct input: ask clears.
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
@@ -559,7 +583,7 @@ describe("JourneyPanel", () => {
     vi.stubGlobal("AudioContext", MockAudioContext);
     vi.stubGlobal("OfflineAudioContext", MockOfflineAudioContext);
 
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/from stop/i), {
       target: { value: "Kal" },
     });
@@ -596,7 +620,7 @@ describe("JourneyPanel", () => {
       };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "Hold the bus?" },
     });
@@ -623,7 +647,7 @@ describe("JourneyPanel", () => {
 
   it("labels refusals with the same unverified family", async () => {
     mockFetch(REFUSE_PAYLOAD);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get nowhere?" },
     });
@@ -749,7 +773,7 @@ describe("JourneyPanel", () => {
       };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/from stop/i, { selector: "input" }), {
       target: { value: "Ernakulam" },
     });
@@ -779,7 +803,7 @@ describe("JourneyPanel", () => {
       throw new Error("network down");
     });
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get there?" },
     });
@@ -806,7 +830,7 @@ describe("JourneyPanel map choice", () => {
   function renderWithChoice(payload, props = {}) {
     const fetch = vi.fn(async () => ({ ok: true, json: async () => payload }));
     vi.stubGlobal("fetch", fetch);
-    const utils = render(<MemoryRouter><JourneyPanel {...props} /></MemoryRouter>);
+    const utils = render(<MemoryRouter><JourneyPanel showAskDictate {...props} /></MemoryRouter>);
     return { fetch, ...utils };
   }
 
@@ -849,7 +873,7 @@ describe("JourneyPanel map choice", () => {
     });
     vi.stubGlobal("fetch", fetch);
     const chooseRef = { current: null };
-    render(<MemoryRouter><JourneyPanel chooseRef={chooseRef} /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate chooseRef={chooseRef} /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North to South?" },
     });
@@ -890,7 +914,7 @@ describe("JourneyPanel map choice", () => {
       };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North to South?" },
     });
@@ -922,7 +946,7 @@ describe("JourneyPanel map choice", () => {
       };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel onShowCandidates={onShowCandidates} /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate onShowCandidates={onShowCandidates} /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North to South?" },
     });
@@ -950,7 +974,7 @@ describe("JourneyPanel map choice", () => {
       return { ok: true, json: async () => geoCandidates };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "How do I get from North to South?" },
     });
@@ -1005,7 +1029,7 @@ describe("JourneyPanel map choice", () => {
     };
     const fetch = vi.fn(async () => ({ ok: true, json: async () => page1 }));
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "buses from Kaloor to Fort Kochi" },
     });
@@ -1080,7 +1104,7 @@ describe("JourneyPanel map choice", () => {
       return { ok: true, json: async () => pages[page] };
     });
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "buses from Kaloor to Fort Kochi" },
     });
@@ -1146,7 +1170,7 @@ describe("JourneyPanel map choice", () => {
     };
     const fetch = vi.fn(async () => ({ ok: true, json: async () => page1 }));
     vi.stubGlobal("fetch", fetch);
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText(/your journey question/i), {
       target: { value: "buses from Kaloor to Fort Kochi" },
     });
@@ -1166,7 +1190,7 @@ describe("JourneyPanel map choice", () => {
   });
 
   it("explains press-and-hold on a quick tap without capturing", async () => {
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     const dictate = screen.getByRole("button", { name: /dictate/i });
     // Persistent hint plus tooltip.
     expect(dictate.getAttribute("title")).toMatch(/press and hold to record/i);
@@ -1237,7 +1261,7 @@ describe("JourneyPanel map choice", () => {
     vi.stubGlobal("AudioContext", MockAudioContext);
     vi.stubGlobal("OfflineAudioContext", MockOfflineAudioContext);
 
-    render(<MemoryRouter><JourneyPanel /></MemoryRouter>);
+    render(<MemoryRouter><JourneyPanel showAskDictate /></MemoryRouter>);
     const dictate = screen.getByRole("button", { name: /dictate/i });
     const ask = screen.getByRole("button", { name: /^ask$/i });
     fireEvent.pointerDown(dictate);
